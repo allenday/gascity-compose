@@ -13,16 +13,21 @@ value_for() {
   awk -F= -v key="$key" '$1 == key { value = substr($0, length(key) + 2) } END { print value }' "$env_file"
 }
 
-reviewer_token="$(value_for GITEA_REVIEWER_TOKEN)"
-worker_token="$(value_for GITEA_WORKER_TOKEN)"
+role_keys='GITEA_MAYOR_TOKEN GITEA_DEACON_TOKEN GITEA_BOOT_TOKEN GITEA_WITNESS_TOKEN GITEA_WORKER_TOKEN'
+tokens=''
+for key in $role_keys; do
+  value="$(value_for "$key")"
+  if [ -z "$value" ]; then
+    printf '%s\n' "ERROR: set non-empty $key in .env" >&2
+    exit 1
+  fi
+  tokens="${tokens}${value}\n"
+done
 
-if [ -z "$reviewer_token" ] || [ -z "$worker_token" ]; then
-  printf '%s\n' 'ERROR: set non-empty GITEA_REVIEWER_TOKEN and GITEA_WORKER_TOKEN in .env' >&2
+duplicates="$(printf '%b' "$tokens" | sort | uniq -d)"
+if [ -n "$duplicates" ]; then
+  printf '%s\n' 'ERROR: every Gitea MCP role must use a distinct service-account token' >&2
   exit 1
 fi
-if [ "$reviewer_token" = "$worker_token" ]; then
-  printf '%s\n' 'ERROR: reviewer and worker must use distinct Gitea service-account tokens' >&2
-  exit 1
-fi
 
-printf '%s\n' 'PASS: distinct Gitea MCP role tokens are configured'
+printf '%s\n' 'PASS: five distinct Gitea MCP role tokens are configured'

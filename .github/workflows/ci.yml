@@ -15,7 +15,10 @@ jobs:
           CITY_DIR: ${{ github.workspace }}/fixture-city
           CITY_NAME: ci-city
           GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
-          GITEA_REVIEWER_TOKEN: ci-reviewer-token
+          GITEA_MAYOR_TOKEN: ci-mayor-token
+          GITEA_DEACON_TOKEN: ci-deacon-token
+          GITEA_BOOT_TOKEN: ci-boot-token
+          GITEA_WITNESS_TOKEN: ci-witness-token
           GITEA_WORKER_TOKEN: ci-worker-token
         run: |
           docker compose config --quiet

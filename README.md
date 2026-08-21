@@ -89,22 +89,27 @@ docker compose --profile gitea-mcp up -d
 make gitea-mcp-up ENV_FILE=.env
 ```
 
-Two localhost-only endpoints are exposed:
+Five localhost-only endpoints are exposed, one for each City role:
 
 | Endpoint | Intended role | Exposed tools |
 | --- | --- | --- |
-| `http://127.0.0.1:8771/mcp` | reviewer / QA agent | issue reads and evidence comments, QA labels |
-| `http://127.0.0.1:8772/mcp` | worker | issue and pull-request discussion/proposal tools |
+| `http://127.0.0.1:8771/mcp` | Mayor | issue planning/status comments and issue labels |
+| `http://127.0.0.1:8772/mcp` | Deacon | read-only issue and label inspection |
+| `http://127.0.0.1:8773/mcp` | Boot | read-only issue and label inspection |
+| `http://127.0.0.1:8774/mcp` | Witness / QA | evidence comments and issue-level QA labels |
+| `http://127.0.0.1:8775/mcp` | worker | issue discussion and pull-request reads |
 
-The reviewer and worker credentials must be distinct. Neither tool allowlist contains repository,
-secret, release, administration, destructive file, or merge operations. Gitea's token permissions
-should mirror that limitation; an MCP allowlist is defence in depth, not a substitute for a
-least-privilege token. Use separate Gitea service accounts whose repository membership is limited to
-the applicable QA/work repositories. In particular, Gitea's `write:issue` token scope also covers
-some destructive raw-API issue operations; agents only see the selected MCP tools, but a stolen PAT
-could otherwise call Gitea directly. The future Woodpecker integration is an evidence producer: its
-immutable run and artifact URLs will be reflected by the bridge into the managed status comment, but
-Woodpecker is not part of this Compose file yet.
+All five credentials must be distinct. The worker intentionally has no pull-request write tool: the
+official server's current coarse write tool includes merge capability. Neither allowlist contains
+repository administration, secrets, releases, destructive file operations, or merge operations.
+Gitea token permissions should mirror that limitation; an MCP allowlist is defence in depth, not a
+substitute for least-privilege tokens and repository membership. These endpoints bind only to
+localhost, so host-process agents are separated by configuration rather than a hard OS boundary.
+In particular, Gitea's `write:issue` token scope also covers some destructive raw-API issue
+operations; agents only see the selected MCP tools, but a stolen PAT could otherwise call Gitea
+directly. The future Woodpecker integration is an evidence producer: its immutable run and artifact
+URLs will be reflected by the bridge into the managed status comment, but Woodpecker is not part of
+this Compose file yet.
 
 ## Monitoring notes
 
