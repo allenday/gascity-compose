@@ -15,9 +15,11 @@ jobs:
           CITY_DIR: ${{ github.workspace }}/fixture-city
           CITY_NAME: ci-city
           GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
+          GITEA_REVIEWER_TOKEN: ci-reviewer-token
+          GITEA_WORKER_TOKEN: ci-worker-token
         run: |
           docker compose config --quiet
-          docker compose --profile city --profile models --profile mcp config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp config --quiet
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses

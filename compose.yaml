@@ -114,6 +114,45 @@ services:
         required: false
     restart: unless-stopped
 
+  # Official Gitea MCP instances are deliberately separated by role and token.
+  # They expose a narrow agent tool surface; City transition policy remains in
+  # the non-MCP gitea-bridge controller.
+  gitea-mcp-reviewer:
+    profiles: [gitea-mcp]
+    image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
+    entrypoint: ["/app/gitea-mcp"]
+    command: ["-t", "http", "-p", "8080"]
+    environment:
+      GITEA_HOST: http://gitea:3000
+      GITEA_ACCESS_TOKEN: ${GITEA_REVIEWER_TOKEN:-}
+      # Review agents may read issues and create/update their evidence comments
+      # and approved QA labels. No repository, release, administration, or merge tools.
+      GITEA_TOOLS: issue_read,issue_write,label_read,label_write
+    ports:
+      - "127.0.0.1:${GITEA_MCP_REVIEWER_PORT:-8771}:8080"
+    depends_on:
+      gitea:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gitea-mcp-worker:
+    profiles: [gitea-mcp]
+    image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
+    entrypoint: ["/app/gitea-mcp"]
+    command: ["-t", "http", "-p", "8080"]
+    environment:
+      GITEA_HOST: http://gitea:3000
+      GITEA_ACCESS_TOKEN: ${GITEA_WORKER_TOKEN:-}
+      # Workers can discuss and propose work in Gitea, but cannot manipulate
+      # repositories, secrets, releases, or merge pull requests.
+      GITEA_TOOLS: issue_read,issue_write,pull_request_read,pull_request_write,pull_request_review_write
+    ports:
+      - "127.0.0.1:${GITEA_MCP_WORKER_PORT:-8772}:8080"
+    depends_on:
+      gitea:
+        condition: service_healthy
+    restart: unless-stopped
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.138.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]

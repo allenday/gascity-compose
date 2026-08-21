@@ -75,6 +75,32 @@ offers the same read-only typed operations over `/mcp`. Its Docker endpoint is b
 only; it is not an unauthenticated remote supervisor-control API. The standalone `mcp-agent-mail`
 service is the upstream Gas City-compatible inter-agent mail bridge, not a City administration MCP.
 
+### Role-scoped Gitea MCP
+
+The optional `gitea-mcp` profile uses the official Gitea MCP image, pinned by digest. It is not a
+replacement for the `gitea-bridge` policy controller: MCP gives an agent Gitea tools, whereas the
+bridge verifies a human actor and allowlisted decision label before changing City work.
+
+Set separate, non-admin tokens in `.env`, then start the profile:
+
+```bash
+docker compose --profile gitea-mcp up -d
+```
+
+Two localhost-only endpoints are exposed:
+
+| Endpoint | Intended role | Exposed tools |
+| --- | --- | --- |
+| `http://127.0.0.1:8771/mcp` | reviewer / QA agent | issue reads and evidence comments, QA labels |
+| `http://127.0.0.1:8772/mcp` | worker | issue and pull-request discussion/proposal tools |
+
+The reviewer and worker credentials must be distinct. Neither tool allowlist contains repository,
+secret, release, administration, destructive file, or merge operations. Gitea's token permissions
+should mirror that limitation; an MCP allowlist is defence in depth, not a substitute for a
+least-privilege token. The future Woodpecker integration is an evidence producer: its immutable run
+and artifact URLs will be reflected by the bridge into the managed status comment, but Woodpecker is
+not part of this Compose file yet.
+
 ## Monitoring notes
 
 - Gatus has role-specific checks via the tiny read-only `role-health` adapter. A suspended or
