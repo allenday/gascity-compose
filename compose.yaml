@@ -114,9 +114,9 @@ services:
         required: false
     restart: unless-stopped
 
-  # Official Gitea MCP instances are deliberately separated by Gas City role
-  # and token. They expose narrow agent tool surfaces; City transition policy
-  # remains in the non-MCP gitea-bridge controller.
+  # Official Gitea MCP instances are separated by the three permission classes
+  # Gas City actually uses. City transition policy remains in the non-MCP
+  # gitea-bridge controller.
   gitea-mcp-mayor:
     profiles: [gitea-mcp]
     image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
@@ -135,37 +135,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  gitea-mcp-deacon:
+  gitea-mcp-observer:
     profiles: [gitea-mcp]
     image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
     entrypoint: ["/app/gitea-mcp"]
     command: ["-t", "http", "-p", "8080"]
     environment:
       GITEA_HOST: http://gitea:3000
-      GITEA_ACCESS_TOKEN: ${GITEA_DEACON_TOKEN:-}
+      GITEA_ACCESS_TOKEN: ${GITEA_OBSERVER_TOKEN:-}
       GITEA_READONLY: "true"
-      # Supervision can inspect issue state and labels but cannot mutate Gitea.
+      # Shared by Deacon, Boot, and workers until a separate worker capability
+      # is justified. It can inspect state but cannot mutate Gitea.
       GITEA_TOOLS: issue_read,label_read
     ports:
-      - "127.0.0.1:${GITEA_MCP_DEACON_PORT:-8772}:8080"
-    depends_on:
-      gitea:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gitea-mcp-boot:
-    profiles: [gitea-mcp]
-    image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
-    entrypoint: ["/app/gitea-mcp"]
-    command: ["-t", "http", "-p", "8080"]
-    environment:
-      GITEA_HOST: http://gitea:3000
-      GITEA_ACCESS_TOKEN: ${GITEA_BOOT_TOKEN:-}
-      GITEA_READONLY: "true"
-      # Recovery may inspect state but cannot mutate Gitea directly.
-      GITEA_TOOLS: issue_read,label_read
-    ports:
-      - "127.0.0.1:${GITEA_MCP_BOOT_PORT:-8773}:8080"
+      - "127.0.0.1:${GITEA_MCP_OBSERVER_PORT:-8772}:8080"
     depends_on:
       gitea:
         condition: service_healthy
@@ -182,25 +165,7 @@ services:
       # Evidence comments and issue-level QA labels, not label definitions.
       GITEA_TOOLS: issue_read,issue_write,label_read
     ports:
-      - "127.0.0.1:${GITEA_MCP_WITNESS_PORT:-8774}:8080"
-    depends_on:
-      gitea:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gitea-mcp-worker:
-    profiles: [gitea-mcp]
-    image: ${GITEA_MCP_IMAGE:-docker.gitea.com/gitea-mcp-server@sha256:dda8d56e6a91fa89cad186becc27c7aa83d74acdd5dc69f89af840d7bb78a631}
-    entrypoint: ["/app/gitea-mcp"]
-    command: ["-t", "http", "-p", "8080"]
-    environment:
-      GITEA_HOST: http://gitea:3000
-      GITEA_ACCESS_TOKEN: ${GITEA_WORKER_TOKEN:-}
-      # Workers can read pull requests and maintain issue discussion. PR write
-      # is withheld because the current coarse tool includes merge operations.
-      GITEA_TOOLS: issue_read,issue_write,pull_request_read
-    ports:
-      - "127.0.0.1:${GITEA_MCP_WORKER_PORT:-8775}:8080"
+      - "127.0.0.1:${GITEA_MCP_WITNESS_PORT:-8773}:8080"
     depends_on:
       gitea:
         condition: service_healthy

@@ -13,7 +13,7 @@ value_for() {
   awk -F= -v key="$key" '$1 == key { value = substr($0, length(key) + 2) } END { print value }' "$env_file"
 }
 
-role_keys='GITEA_MAYOR_TOKEN GITEA_DEACON_TOKEN GITEA_BOOT_TOKEN GITEA_WITNESS_TOKEN GITEA_WORKER_TOKEN'
+role_keys='GITEA_MAYOR_TOKEN GITEA_OBSERVER_TOKEN GITEA_WITNESS_TOKEN'
 tokens=''
 for key in $role_keys; do
   value="$(value_for "$key")"
@@ -26,8 +26,8 @@ done
 
 duplicates="$(printf '%b' "$tokens" | sort | uniq -d)"
 if [ -n "$duplicates" ]; then
-  printf '%s\n' 'ERROR: every Gitea MCP role must use a distinct service-account token' >&2
+  printf '%s\n' 'ERROR: every Gitea MCP permission class must use a distinct service-account token' >&2
   exit 1
 fi
 
-printf '%s\n' 'PASS: five distinct Gitea MCP role tokens are configured'
+printf '%s\n' 'PASS: three distinct Gitea MCP permission-class tokens are configured'
