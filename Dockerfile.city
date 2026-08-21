@@ -1,0 +1,23 @@
+# There is no published general-purpose Gas City runtime image. This creates a
+# small, reproducible controller image from the upstream release source.
+FROM golang:1.26.6-bookworm AS build
+ARG GASCITY_REF=v1.3.4
+ARG BEADS_VERSION=v1.1.0
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --depth 1 --branch "${GASCITY_REF}" https://github.com/gastownhall/gascity.git . \
+    && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/gc ./cmd/gc \
+    && GOBIN=/out go install github.com/gastownhall/beads/cmd/bd@"${BEADS_VERSION}"
+
+FROM dolthub/dolt:latest AS dolt
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates git jq lsof procps tini tmux && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/gc /usr/local/bin/gc
+COPY --from=build /out/bd /usr/local/bin/bd
+COPY --from=dolt /usr/local/bin/dolt /usr/local/bin/dolt
+COPY docker/city-entrypoint.sh /usr/local/bin/city-entrypoint
+RUN chmod 0755 /usr/local/bin/city-entrypoint && useradd -m -u 1000 -s /bin/bash gascity && mkdir -p /var/lib/gascity && chown -R gascity:gascity /var/lib/gascity
+USER gascity
+WORKDIR /city
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/city-entrypoint"]

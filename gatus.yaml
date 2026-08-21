@@ -1,0 +1,56 @@
+web:
+  port: 8080
+
+storage:
+  type: sqlite
+  path: /data/gatus.db
+
+endpoints:
+  - name: gitea
+    group: platform
+    url: http://gitea:3000/api/healthz
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: ollama
+    group: platform
+    url: http://ollama:11434/api/tags
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: prometheus
+    group: observability
+    url: http://prometheus:9090/-/healthy
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: loki
+    group: observability
+    url: http://loki:3100/ready
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: city-api
+    group: gas-city
+    url: http://city:8372/health
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: deacon
+    group: gas-city-roles
+    url: http://role-health:8081/health/deacon
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: boot
+    group: gas-city-roles
+    url: http://role-health:8081/health/boot
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+  - name: witness
+    group: gas-city-roles
+    url: http://role-health:8081/health/witness
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"

@@ -1,0 +1,200 @@
+name: gascity
+
+services:
+  # Deliberately profile-gated: never run two supervisors against one city.
+  city:
+    profiles: [city]
+    build:
+      context: .
+      dockerfile: Dockerfile.city
+    environment:
+      GC_HOME: /var/lib/gascity
+      CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      CITY_NAME: ${CITY_NAME:-my-city}
+      GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
+      GC_OTEL_LOGS_URL: http://otel-collector:4318/v1/logs
+    volumes:
+      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      - ./state/gc-runtime:/var/lib/gascity
+    ports:
+      - "8372:8372"
+    depends_on:
+      otel-collector:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  ollama:
+    profiles: [models]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ./state/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+
+  model-init:
+    profiles: [models]
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
+    entrypoint: ["/bin/sh", "-ec", "ollama pull \"$${OLLAMA_MODEL}\""]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  gitea:
+    image: gitea/gitea:1.27.2-rootless
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: 127.0.0.1
+      GITEA__server__ROOT_URL: http://127.0.0.1:${GITEA_HTTP_PORT:-3002}/
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__START_SSH_SERVER: "true"
+      GITEA__server__SSH_DOMAIN: 127.0.0.1
+      GITEA__server__SSH_PORT: ${GITEA_SSH_PORT:-2223}
+      GITEA__server__SSH_LISTEN_PORT: "2222"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost
+      GITEA__log__LEVEL: info
+    ports:
+      - "127.0.0.1:${GITEA_HTTP_PORT:-3002}:3000"
+      - "127.0.0.1:${GITEA_SSH_PORT:-2223}:2222"
+    volumes:
+      - ${GITEA_STATE_DIR:-./state/gitea}/data:/var/lib/gitea
+      - ${GITEA_STATE_DIR:-./state/gitea}/config:/etc/gitea
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  mcp-agent-mail:
+    profiles: [mcp]
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-agent-mail
+    restart: unless-stopped
+    volumes:
+      - ./state/mcp-agent-mail:/var/lib/mcp-mail
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health/liveness')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+
+  gascity-mcp:
+    profiles: [mcp]
+    build:
+      context: ${GASCITY_MCP_DIR:-../gascity-mcp}
+    environment:
+      GASCITY_API_URL: http://city:8372
+      GASCITY_API_HOST: 127.0.0.1:8372
+      GASCITY_CITY_NAME: ${CITY_NAME:-my-city}
+      GASCITY_MCP_HOST: 0.0.0.0
+      GASCITY_MCP_PORT: "8766"
+    ports:
+      - "127.0.0.1:${GASCITY_MCP_PORT:-8766}:8766"
+    depends_on:
+      city:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.138.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.7.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./state/prometheus:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.5.3
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./loki.yaml:/etc/loki/config.yaml:ro
+      - ./state/loki:/loki
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./state/grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  role-health:
+    build:
+      context: ./role-health
+    environment:
+      CITY_API: ${CITY_API:-http://city:8372}
+      CITY_API_HOST: ${CITY_API_HOST:-127.0.0.1:8372}
+      CITY_NAME: ${CITY_NAME:-my-city}
+    depends_on:
+      city:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+  gatus:
+    image: twinproduction/gatus:v5.26.0
+    volumes:
+      - ./gatus.yaml:/config/config.yaml:ro
+      - ./state/gatus:/data
+    ports:
+      - "127.0.0.1:${GATUS_PORT:-8080}:8080"
+    depends_on:
+      gitea:
+        condition: service_healthy
+    restart: unless-stopped
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.9.1
+    command: ["--path.rootfs=/host"]
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    restart: unless-stopped

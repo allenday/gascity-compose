@@ -1,0 +1,13 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {}, "overrides": []}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "id": 1, "options": {"legend": {"displayMode": "table", "placement": "bottom"}}, "targets": [{"expr": "up", "refId": "A"}], "title": "Scrape targets", "type": "timeseries"},
+    {"datasource": {"type": "loki", "uid": "loki"}, "fieldConfig": {"defaults": {}, "overrides": []}, "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "id": 2, "options": {"showLabels": false, "showTime": true, "wrapLogMessage": true}, "targets": [{"expr": "{service_name=~\".+\"}", "refId": "A"}], "title": "Gas City logs", "type": "logs"}
+  ],
+  "schemaVersion": 41,
+  "tags": ["gas-city"],
+  "title": "Gas City platform",
+  "uid": "gas-city-platform",
+  "version": 1
+}
