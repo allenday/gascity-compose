@@ -16,14 +16,16 @@ def role_state(role):
         with urlopen(Request(url, headers=headers), timeout=5) as response:
             payload = json.load(response)
     except (URLError, ValueError, OSError) as exc:
-        return False, {"reason": f"city API unavailable: {exc}"}
+        return False, {"state": "unavailable", "reason": f"city API unavailable: {exc}"}
     for agent in payload.get("agent_details", []):
         names = {agent.get("name"), agent.get("qualified_name")}
         if role in names or any(str(name).endswith("." + role) for name in names if name):
             if agent.get("suspended"):
-                return False, {"reason": "role suspended", "agent": agent}
-            return True, {"agent": agent}
-    return False, {"reason": "role not found"}
+                # A deliberately suspended role is not an operational failure.  Returning
+                # success lets Gatus reserve red for roles that are genuinely unavailable.
+                return True, {"state": "suspended", "reason": "role deliberately suspended", "agent": agent}
+            return True, {"state": "active", "agent": agent}
+    return False, {"state": "missing", "reason": "role not found"}
 
 
 class Handler(BaseHTTPRequestHandler):
