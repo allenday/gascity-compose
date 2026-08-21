@@ -4,6 +4,9 @@ services:
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
     profiles: [city]
+    # Match the owner of linked city/rig paths so Gas City can maintain their
+    # local Dolt mirrors without granting the controller root access.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     build:
       context: .
       dockerfile: Dockerfile.city
@@ -13,16 +16,27 @@ services:
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
       GC_HOME: /var/lib/gascity
+      HOME: /var/lib/gascity/home
       CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       CITY_NAME: ${CITY_NAME:-my-city}
       GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
       GC_OTEL_LOGS_URL: http://otel-collector:4318/v1/logs
       OLLAMA_HOST: http://ollama:11434
+      CODEX_HOME: /run/codex
+      DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
+      DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
     volumes:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
+      - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
+      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in .env to the host Codex auth file}:/run/secrets/codex-auth.json:ro
       - ./state/gc-runtime:/var/lib/gascity
+    tmpfs:
+      # The City process runs as the configured unprivileged host UID/GID,
+      # which copies the read-only host credential into this ephemeral home.
+      - /run/codex:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
     ports:
-      - "8372:8372"
+      - "127.0.0.1:8372:8372"
     depends_on:
       otel-collector:
         condition: service_started
