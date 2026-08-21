@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all Compose profiles
+        env:
+          CITY_DIR: ${{ github.workspace }}/fixture-city
+          CITY_NAME: ci-city
+          GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
+          GITEA_MAYOR_TOKEN: ci-mayor-token
+          GITEA_DEACON_TOKEN: ci-deacon-token
+          GITEA_BOOT_TOKEN: ci-boot-token
+          GITEA_WITNESS_TOKEN: ci-witness-token
+          GITEA_WORKER_TOKEN: ci-worker-token
+        run: |
+          docker compose config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp config --quiet
+      - name: Build the local adapter image
+        run: docker build --tag gascity-role-health:ci role-health
+      - name: Check the smoke script parses
+        run: |
+          sh -n scripts/smoke.sh
+          sh -n scripts/gitea-mcp-preflight.sh
