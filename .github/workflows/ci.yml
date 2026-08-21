@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all Compose profiles
+        env:
+          CITY_DIR: ${{ github.workspace }}/fixture-city
+          CITY_NAME: ci-city
+          GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
+        run: |
+          docker compose config --quiet
+          docker compose --profile city --profile models --profile mcp config --quiet
+      - name: Build the local adapter image
+        run: docker build --tag gascity-role-health:ci role-health
+      - name: Check the smoke script parses
+        run: sh -n scripts/smoke.sh

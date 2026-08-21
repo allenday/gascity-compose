@@ -18,10 +18,13 @@ docker compose up -d
 
 This starts the platform services, including a fresh Gitea at `http://127.0.0.1:3002`, Grafana at
 `http://127.0.0.1:3000`, Gatus at `http://127.0.0.1:8080`, and Prometheus at
-`http://127.0.0.1:9090`. Ollama is in the explicit `models` profile because its base image is
-large; enable it only when you intend to use Docker-hosted inference.
+`http://127.0.0.1:9090`. Ollama is in the explicit `models` profile because its current base image
+is roughly 7 GB; enable it only when you intend to use Docker-hosted inference.
 
 All mutable state is bind-mounted beneath `./state`; no named Docker volumes are used.
+
+After startup, run `make smoke ENV_FILE=.env` to verify the exposed platform endpoints and
+Prometheus scrape targets.
 
 ## Start the City safely
 
