@@ -27,3 +27,5 @@ jobs:
         run: |
           sh -n scripts/smoke.sh
           sh -n scripts/gitea-mcp-preflight.sh
+          sh -n scripts/gitea-mcp-bootstrap.sh
+          sh -n scripts/gitea-mcp-smoke.sh

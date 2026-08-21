@@ -89,6 +89,14 @@ docker compose --profile gitea-mcp up -d
 make gitea-mcp-up ENV_FILE=.env
 ```
 
+For a fresh local Gitea, use the idempotent bootstrap instead. It creates three
+restricted, non-admin service accounts, stores their scoped tokens only in the
+ignored `.env`, starts the profile, and checks the live MCP tool surfaces:
+
+```bash
+make gitea-mcp-bootstrap ENV_FILE=.env
+```
+
 Three localhost-only endpoints are exposed, one for each permission class:
 
 | Endpoint | Intended role | Exposed tools |
