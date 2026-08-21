@@ -85,6 +85,8 @@ Set separate, non-admin tokens in `.env`, then start the profile:
 
 ```bash
 docker compose --profile gitea-mcp up -d
+# or perform the distinct-token preflight first:
+make gitea-mcp-up ENV_FILE=.env
 ```
 
 Two localhost-only endpoints are exposed:
@@ -97,9 +99,12 @@ Two localhost-only endpoints are exposed:
 The reviewer and worker credentials must be distinct. Neither tool allowlist contains repository,
 secret, release, administration, destructive file, or merge operations. Gitea's token permissions
 should mirror that limitation; an MCP allowlist is defence in depth, not a substitute for a
-least-privilege token. The future Woodpecker integration is an evidence producer: its immutable run
-and artifact URLs will be reflected by the bridge into the managed status comment, but Woodpecker is
-not part of this Compose file yet.
+least-privilege token. Use separate Gitea service accounts whose repository membership is limited to
+the applicable QA/work repositories. In particular, Gitea's `write:issue` token scope also covers
+some destructive raw-API issue operations; agents only see the selected MCP tools, but a stolen PAT
+could otherwise call Gitea directly. The future Woodpecker integration is an evidence producer: its
+immutable run and artifact URLs will be reflected by the bridge into the managed status comment, but
+Woodpecker is not part of this Compose file yet.
 
 ## Monitoring notes
 

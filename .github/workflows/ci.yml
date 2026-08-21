@@ -23,4 +23,6 @@ jobs:
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses
-        run: sh -n scripts/smoke.sh
+        run: |
+          sh -n scripts/smoke.sh
+          sh -n scripts/gitea-mcp-preflight.sh
