@@ -3,18 +3,28 @@
 FROM golang:1.26.6-bookworm AS build
 ARG GASCITY_REF=v1.3.4
 ARG BEADS_VERSION=v1.1.0
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG CAGENT_REF=v1.23.0
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates git libicu-dev pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-RUN git clone --depth 1 --branch "${GASCITY_REF}" https://github.com/gastownhall/gascity.git . \
+RUN git init gascity \
+    && cd gascity \
+    && git remote add origin https://github.com/gastownhall/gascity.git \
+    && git fetch --depth 1 origin "${GASCITY_REF}" \
+    && git checkout --detach FETCH_HEAD \
     && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/gc ./cmd/gc \
-    && GOBIN=/out go install github.com/gastownhall/beads/cmd/bd@"${BEADS_VERSION}"
+    && GOBIN=/out go install github.com/steveyegge/beads/cmd/bd@"${BEADS_VERSION}" \
+    && cd /src \
+    && git clone --depth 1 --branch "${CAGENT_REF}" https://github.com/docker/cagent.git cagent \
+    && cd cagent \
+    && CGO_ENABLED=1 go build -trimpath -ldflags='-s -w' -o /out/cagent .
 
 FROM dolthub/dolt:latest AS dolt
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates git jq lsof procps tini tmux && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git jq libicu72 lsof procps python3 tini tmux && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/gc /usr/local/bin/gc
 COPY --from=build /out/bd /usr/local/bin/bd
+COPY --from=build /out/cagent /usr/local/bin/cagent
 COPY --from=dolt /usr/local/bin/dolt /usr/local/bin/dolt
 COPY docker/city-entrypoint.sh /usr/local/bin/city-entrypoint
 RUN chmod 0755 /usr/local/bin/city-entrypoint && useradd -m -u 1000 -s /bin/bash gascity && mkdir -p /var/lib/gascity && chown -R gascity:gascity /var/lib/gascity

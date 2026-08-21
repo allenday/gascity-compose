@@ -7,12 +7,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.city
+      args:
+        # Pin this to the commit used by the host supervisor before handoff.
+        GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
+        CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
       GC_HOME: /var/lib/gascity
       CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       CITY_NAME: ${CITY_NAME:-my-city}
       GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
       GC_OTEL_LOGS_URL: http://otel-collector:4318/v1/logs
+      OLLAMA_HOST: http://ollama:11434
     volumes:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./state/gc-runtime:/var/lib/gascity
@@ -26,7 +31,9 @@ services:
     restart: unless-stopped
 
   ollama:
-    profiles: [models]
+    # City requires a reachable model service; the models profile remains
+    # useful for explicit model pulling through model-init.
+    profiles: [city, models]
     image: ollama/ollama:latest
     restart: unless-stopped
     ports:
