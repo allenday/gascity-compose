@@ -21,7 +21,9 @@ services:
       CITY_NAME: ${CITY_NAME:-my-city}
       GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
       GC_OTEL_LOGS_URL: http://otel-collector:4318/v1/logs
-      OLLAMA_HOST: http://ollama:11434
+      # Route inference through the local fork's metrics proxy. The proxy keeps
+      # the OpenAI-compatible endpoint intact while recording request usage.
+      OLLAMA_HOST: http://ollama-metrics:8080
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
@@ -59,6 +61,23 @@ services:
       interval: 15s
       timeout: 10s
       retries: 12
+
+  ollama-metrics:
+    profiles: [city]
+    build:
+      # The fork is checked out locally while the upstream contribution is
+      # pending. This stays source-visible and avoids an unpublished image tag.
+      context: ${OLLAMA_METRICS_DIR:-../ollama-metrics}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      PORT: "8080"
+      # cagent streams through /v1/chat/completions. Ask Ollama for its final
+      # usage chunk so the proxy can account for prompt/completion tokens.
+      INCLUDE_STREAM_USAGE: "true"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
 
   model-init:
     profiles: [models]
@@ -233,6 +252,7 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${OLLAMA_METRICS_DIR:-../ollama-metrics}/prometheus:/var/lib/grafana/ollama-metrics-dashboard:ro
       - ./state/grafana:/var/lib/grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
