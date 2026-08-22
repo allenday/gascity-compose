@@ -42,8 +42,8 @@ calls a local binary); move those providers to service-network addresses before 
 
 Gas City publishes OTLP only when `GC_OTEL_METRICS_URL` and `GC_OTEL_LOGS_URL` are set. This stack
 sets both for the containerized supervisor. The collector turns OTLP metrics into Prometheus
-scrapes and forwards OTLP logs to Loki. The supplied Grafana dashboard is deliberately small;
-Grafana Explore is available for raw logs.
+scrapes and forwards OTLP logs to Loki. Grafana provisions a City operations dashboard and the
+stock Ollama Metrics dashboard; Grafana Explore remains available for raw logs.
 
 ## Gitea adoption
 
@@ -69,6 +69,21 @@ docker compose --profile models run --rm model-init
 # Run mcp_agent_mail and the read-only gascity-mcp HTTP service.
 docker compose --profile city --profile mcp up -d --build
 ```
+
+### Ollama request metrics
+
+The `city` profile routes its OpenAI-compatible Ollama traffic through a locally checked-out fork
+of `allenday/ollama-metrics`, while the upstream `/v1/chat/completions` contribution is pending.
+Clone it beside this repository (or set `OLLAMA_METRICS_DIR` to another absolute checkout):
+
+```bash
+git clone https://github.com/allenday/ollama-metrics.git ../ollama-metrics
+docker compose --profile city up -d --build
+```
+
+The proxy is scraped by Prometheus and its upstream-provided Grafana dashboard is mounted read-only.
+`INCLUDE_STREAM_USAGE=true` is enabled only for the proxy so streaming City requests provide their
+final prompt/completion usage counters.
 
 `gascity-mcp` comes from the sibling `cyberstorm-dev/gascity-mcp` checkout (`GASCITY_MCP_DIR`) and
 offers the same read-only typed operations over `/mcp`. Its Docker endpoint is bound to localhost

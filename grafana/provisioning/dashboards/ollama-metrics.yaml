@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: ollama-metrics
+    type: file
+    options:
+      path: /var/lib/grafana/ollama-metrics-dashboard

@@ -2,12 +2,144 @@
   "annotations": {"list": []},
   "editable": true,
   "panels": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {}, "overrides": []}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "id": 1, "options": {"legend": {"displayMode": "table", "placement": "bottom"}}, "targets": [{"expr": "up", "refId": "A"}], "title": "Scrape targets", "type": "timeseries"},
-    {"datasource": {"type": "loki", "uid": "loki"}, "fieldConfig": {"defaults": {}, "overrides": []}, "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "id": 2, "options": {"showLabels": false, "showTime": true, "wrapLogMessage": true}, "targets": [{"expr": "{service_name=~\".+\"}", "refId": "A"}], "title": "Gas City logs", "type": "logs"}
+    {
+      "type": "text",
+      "title": "What this dashboard measures",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"mode": "markdown", "content": "### City operations, not just container reachability\n\nThe panels below show Beads/Dolt-backed work flow, controller activity, agent lifecycle, API latency, and the Docker host. **Token and cost usage are not currently emitted by Gas City into Prometheus**, so they are intentionally called out rather than guessed."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Bead store health",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 4},
+      "id": 2,
+      "targets": [{"expr": "max(gc_bead_store_healthy)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "unhealthy"}, "1": {"text": "healthy"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Bead calls (selected range)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 5, "x": 4, "y": 4},
+      "id": 3,
+      "targets": [{"expr": "sum(increase(gc_bd_calls_total[$__range]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"decimals": 0}, "overrides": []},
+      "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Bead errors (selected range)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 5, "x": 9, "y": 4},
+      "id": 4,
+      "targets": [{"expr": "sum(increase(gc_bd_calls_total{status=\"error\"}[$__range]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Bead operation p95",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 5, "x": 14, "y": 4},
+      "id": 5,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(gc_bd_duration_ms_milliseconds_bucket[$__rate_interval])))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 1}, "overrides": []},
+      "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "City API p95",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 5, "x": 19, "y": 4},
+      "id": 6,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(gc_http_duration_ms_milliseconds_bucket[$__rate_interval])))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 1}, "overrides": []},
+      "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
+    },
+    {
+      "type": "timeseries",
+      "title": "Beads/Dolt work flow by command and outcome",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
+      "id": 7,
+      "targets": [{"expr": "sum by (subcommand, status) (rate(gc_bd_calls_total[$__rate_interval]))", "legendFormat": "{{subcommand}} · {{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent lifecycle: starts and stops",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
+      "id": 8,
+      "targets": [
+        {"expr": "sum by (agent) (rate(gc_agent_starts_total[$__rate_interval]))", "legendFormat": "start · {{agent}}", "refId": "A"},
+        {"expr": "sum by (reason) (rate(gc_agent_stops_total[$__rate_interval]))", "legendFormat": "stop · {{reason}}", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Controller reconciliation cycles",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 17},
+      "id": 9,
+      "targets": [{"expr": "sum by (started) (rate(gc_reconcile_cycles_total[$__rate_interval]))", "legendFormat": "started={{started}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "City API requests by status",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 17},
+      "id": 10,
+      "targets": [{"expr": "sum by (status) (rate(gc_http_requests_total[$__rate_interval]))", "legendFormat": "HTTP {{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Docker host pressure",
+      "description": "On macOS, node-exporter reports the Docker Linux VM. It does not report the macOS host kernel.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 17},
+      "id": 11,
+      "targets": [
+        {"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[$__rate_interval])) * 100)", "legendFormat": "CPU", "refId": "A"},
+        {"expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "legendFormat": "Memory", "refId": "B"},
+        {"expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/var/lib\"} / node_filesystem_size_bytes{mountpoint=\"/var/lib\"})", "legendFormat": "Disk", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "type": "logs",
+      "title": "Recent City events",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 9, "w": 16, "x": 0, "y": 24},
+      "id": 12,
+      "targets": [{"expr": "{service_name=\"gascity\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showLabels": false, "showTime": true, "wrapLogMessage": true}
+    },
+    {
+      "type": "text",
+      "title": "Token and cost accounting",
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 24},
+      "id": 13,
+      "options": {"mode": "markdown", "content": "### Not instrumented yet\n\nGas City currently exports agent, Beads/Dolt, controller, HTTP, and lifecycle metrics—but **no per-request token or provider-cost metric**. A graph here would be fiction.\n\nTo add this, the provider invocation boundary needs to emit token input/output and cost counters, with the model/provider labels controlled for cardinality."
+      }
+    }
   ],
   "schemaVersion": 41,
-  "tags": ["gas-city"],
-  "title": "Gas City platform",
+  "tags": ["gas-city", "operations", "beads", "dolt"],
+  "title": "Gas City operations",
   "uid": "gas-city-platform",
-  "version": 1
+  "version": 2
 }
