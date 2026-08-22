@@ -13,6 +13,11 @@ jobs:
       - name: Validate all Compose profiles
         env:
           CITY_DIR: ${{ github.workspace }}/fixture-city
+          MY_PROJECT_DIR: ${{ github.workspace }}/fixture-my-project
+          GASCITY_SOURCE_DIR: ${{ github.workspace }}/fixture-gascity
+          CODEX_AUTH_FILE: ${{ github.workspace }}/fixture-codex-auth.json
+          GASCITY_MCP_DIR: ${{ github.workspace }}
+          OLLAMA_METRICS_DIR: ${{ github.workspace }}
           CITY_NAME: ci-city
           GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
           GITEA_MAYOR_TOKEN: ci-mayor-token
