@@ -30,5 +30,5 @@ gitea-bridge-bootstrap:
 
 gitea-bridge-up: gitea-bridge-bootstrap
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_ISSUE_URL" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
-	@test -n "$$(awk -F= '$$1=="GASCITY_BRIDGE_RUN_ID" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
+	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_RUN_ID" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	$(COMPOSE) --profile city --profile gitea-bridge up -d --build gitea-bridge

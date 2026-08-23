@@ -17,6 +17,7 @@ jobs:
           GASCITY_SOURCE_DIR: ${{ github.workspace }}/fixture-gascity
           CODEX_AUTH_FILE: ${{ github.workspace }}/fixture-codex-auth.json
           GASCITY_MCP_DIR: ${{ github.workspace }}
+          GITEA_BRIDGE_DIR: ${{ github.workspace }}
           OLLAMA_METRICS_DIR: ${{ github.workspace }}
           CITY_NAME: ci-city
           TAILNET_IP: 100.64.0.1
@@ -37,3 +38,4 @@ jobs:
           sh -n scripts/gitea-mcp-preflight.sh
           sh -n scripts/gitea-mcp-bootstrap.sh
           sh -n scripts/gitea-mcp-smoke.sh
+          sh -n scripts/gitea-bridge-bootstrap.sh

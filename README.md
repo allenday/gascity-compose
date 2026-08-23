@@ -277,12 +277,12 @@ event came from an authorized Gitea actor. Its capability-scoped `ResolveApprove
 can invoke an injected resolver only for an exact City/run/step-bead identity after acceptance
 checks and tracker revalidation, using a canonical idempotency key. That explicit step-bead target
 matches `gascity-mcp`'s private `close_bead` capability without broadening its public MCP surface.
-The pinned `gitea-bridge` Compose profile builds from `GASCITY_GITEA_DIR` and runs its new
+The pinned `gitea-bridge` Compose profile builds from `GITEA_BRIDGE_DIR` and runs its new
 single-binding status daemon. Because the source repository is private, clone it beside this
 repository (or set an absolute checkout path); the image build verifies that its HEAD matches
 `GASCITY_GITEA_REF`. The build follows the repository's native packaging: a static Go binary in a
 non-root distroless runtime image. Configure a dedicated restricted `GITEA_BRIDGE_TOKEN`, one canonical
-`GITEA_BRIDGE_ISSUE_URL`, and one `GASCITY_BRIDGE_RUN_ID`, then start it alongside the City:
+`GITEA_BRIDGE_ISSUE_URL`, and one `GITEA_BRIDGE_RUN_ID`, then start it alongside the City:
 
 ```bash
 docker compose --profile city --profile gitea-bridge up -d --build gitea-bridge

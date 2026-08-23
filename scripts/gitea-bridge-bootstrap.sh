@@ -44,14 +44,14 @@ if [ -z "$(value_for GITEA_BRIDGE_TOKEN)" ]; then
   printf '%s\n' 'Configured GITEA_BRIDGE_TOKEN for restricted gascity-gitea-bridge account'
 fi
 
-for key in GITEA_BRIDGE_ISSUE_URL GASCITY_BRIDGE_RUN_ID; do
+for key in GITEA_BRIDGE_ISSUE_URL GITEA_BRIDGE_RUN_ID; do
   if ! grep -q "^${key}=" "$env_file"; then
     set_value "$key" ""
   fi
 done
 
-if [ -z "$(value_for GITEA_BRIDGE_ISSUE_URL)" ] || [ -z "$(value_for GASCITY_BRIDGE_RUN_ID)" ]; then
-  printf '%s\n' 'PENDING: set GITEA_BRIDGE_ISSUE_URL and GASCITY_BRIDGE_RUN_ID before starting the bridge'
+if [ -z "$(value_for GITEA_BRIDGE_ISSUE_URL)" ] || [ -z "$(value_for GITEA_BRIDGE_RUN_ID)" ]; then
+  printf '%s\n' 'PENDING: set GITEA_BRIDGE_ISSUE_URL and GITEA_BRIDGE_RUN_ID before starting the bridge'
   exit 0
 fi
 

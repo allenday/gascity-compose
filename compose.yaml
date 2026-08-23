@@ -209,7 +209,7 @@ services:
   gitea-bridge:
     profiles: [gitea-bridge]
     build:
-      context: ${GASCITY_GITEA_DIR:-../gascity-gitea}
+      context: ${GITEA_BRIDGE_DIR:-../gascity-gitea}
       args:
         GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-162811ed2b137a4a7a4a9bec6cf2da3146397478}
       dockerfile_inline: |
@@ -232,7 +232,7 @@ services:
       GITEA_ISSUE_URL: ${GITEA_BRIDGE_ISSUE_URL:-}
       GASCITY_API_URL: http://city:8372
       GASCITY_CITY_NAME: ${CITY_NAME:-my-city}
-      GASCITY_RUN_ID: ${GASCITY_BRIDGE_RUN_ID:-}
+      GASCITY_RUN_ID: ${GITEA_BRIDGE_RUN_ID:-}
       BRIDGE_INTERVAL_SECONDS: ${GITEA_BRIDGE_INTERVAL_SECONDS:-30}
     depends_on:
       gitea:
