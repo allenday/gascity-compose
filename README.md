@@ -290,6 +290,17 @@ docker compose --profile city --profile gitea-bridge up -d --build gitea-bridge
 This daemon reads the selected run and steps and updates only its managed Gitea status comment.
 It deliberately does not wire the library's gate resolver or MCP's private `close_bead` method;
 it has no bead-close, issue-close, parent-run finalization, or general City mutation authority.
+Its configuration also fails closed unless `GITEA_URL` exactly matches the instance in the issue
+URL; City endpoints reject embedded credentials, non-HTTP schemes, query strings, and fragments.
+
+Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
+
+```bash
+make gitea-bridge-bootstrap ENV_FILE=.env
+```
+
+`make gitea-bridge-up ENV_FILE=.env` additionally refuses to start until both the issue URL and
+run ID are non-empty.
 
 ### Role-scoped Gitea MCP
 

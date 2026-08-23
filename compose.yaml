@@ -211,7 +211,7 @@ services:
     build:
       context: ${GASCITY_GITEA_DIR:-../gascity-gitea}
       args:
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-023b11a7fd93d6c8b4ac2eba4f709a027ab75898}
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-41b9bfa5bdaa5fe1212f5f82e3ab919c70c118d8}
       dockerfile_inline: |
         FROM golang:1.24-bookworm AS build
         ARG GASCITY_GITEA_REF
