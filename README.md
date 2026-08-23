@@ -274,11 +274,12 @@ The companion `cyberstorm-dev/gascity-gitea` repository currently provides the t
 `DeliveryBinding` reconciliation library and read-only `DecisionPolicy` evidence verification.
 The latter requires a configured approval label and verifies that its newest matching timeline
 event came from an authorized Gitea actor. Its capability-scoped `ResolveApprovedGate` boundary
-can invoke an injected resolver only for an exact City/run/gate identity after acceptance checks
-and tracker revalidation, using a canonical idempotency key. The repository still has no City HTTP
-adapter, durable reconciliation loop, executable, or container entrypoint. Consequently it is not
-yet a Compose service or image pin; gate resolution also remains separate from issue and parent-run
-finalization.
+can invoke an injected resolver only for an exact City/run/step-bead identity after acceptance
+checks and tracker revalidation, using a canonical idempotency key. That explicit step-bead target
+matches `gascity-mcp`'s private `close_bead` capability without broadening its public MCP surface.
+The repository still has no City HTTP adapter, durable reconciliation loop, executable, or
+container entrypoint. Consequently it is not yet a Compose service or image pin; gate resolution
+also remains separate from issue and parent-run finalization.
 
 ### Role-scoped Gitea MCP
 
