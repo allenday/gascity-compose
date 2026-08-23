@@ -300,6 +300,11 @@ only then atomically journal the outcome. They remain deliberately uninstantiate
 profile: tracker authorization and CI/acceptance evidence must be wired by a separate resolution
 controller before any automated step closure is enabled.
 
+That future controller must bind every acceptance check to one immutable source subject: the
+canonical repository URL plus a full Git object ID or `sha256:` digest. Mutable branches/tags and
+evidence for any other revision are rejected, so a passing build cannot authorize closure of work
+for a different source state.
+
 Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
 
 ```bash
