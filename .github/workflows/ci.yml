@@ -19,13 +19,16 @@ jobs:
           GASCITY_MCP_DIR: ${{ github.workspace }}
           OLLAMA_METRICS_DIR: ${{ github.workspace }}
           CITY_NAME: ci-city
+          TAILNET_IP: 100.64.0.1
+          STACK_USERNAME: ci-admin
+          STACK_PASSWORD: ci-only-not-a-secret
           GRAFANA_ADMIN_PASSWORD: ci-only-not-a-secret
           GITEA_MAYOR_TOKEN: ci-mayor-token
           GITEA_OBSERVER_TOKEN: ci-observer-token
           GITEA_WITNESS_TOKEN: ci-witness-token
         run: |
           docker compose config --quiet
-          docker compose --profile city --profile models --profile mcp --profile gitea-mcp config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge config --quiet
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses
