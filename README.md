@@ -280,7 +280,8 @@ matches `gascity-mcp`'s private `close_bead` capability without broadening its p
 The pinned `gitea-bridge` Compose profile builds from `GASCITY_GITEA_DIR` and runs its new
 single-binding status daemon. Because the source repository is private, clone it beside this
 repository (or set an absolute checkout path); the image build verifies that its HEAD matches
-`GASCITY_GITEA_REF`. Configure a dedicated restricted `GITEA_BRIDGE_TOKEN`, one canonical
+`GASCITY_GITEA_REF`. The build follows the repository's native packaging: a static Go binary in a
+non-root distroless runtime image. Configure a dedicated restricted `GITEA_BRIDGE_TOKEN`, one canonical
 `GITEA_BRIDGE_ISSUE_URL`, and one `GASCITY_BRIDGE_RUN_ID`, then start it alongside the City:
 
 ```bash
