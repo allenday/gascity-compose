@@ -294,6 +294,12 @@ it has no bead-close, issue-close, parent-run finalization, or general City muta
 Its configuration also fails closed unless `GITEA_URL` exactly matches the instance in the issue
 URL; City endpoints reject embedded credentials, non-HTTP schemes, query strings, and fragments.
 
+The pinned library also contains replay-safe `StepResolver` and `OutcomeStore` primitives. They
+re-read one exact blocked step, send a scoped idempotency key, verify City reports completion, and
+only then atomically journal the outcome. They remain deliberately uninstantiated by this status
+profile: tracker authorization and CI/acceptance evidence must be wired by a separate resolution
+controller before any automated step closure is enabled.
+
 Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
 
 ```bash
