@@ -39,22 +39,22 @@
       <div class="grid">
         <a data-port="8372"><strong>Gas City API</strong><span>Available with the city profile</span></a>
         <a data-port="11435"><strong>Ollama</strong><span>Available with the city or models profile</span></a>
-        <a data-port="8766"><strong>Gas City MCP</strong><span>Available with the MCP profile</span></a>
+        <a data-port="8766" data-path="/mcp"><strong>Gas City MCP</strong><span>MCP protocol endpoint (event stream)</span></a>
       </div>
     </section>
 
     <section>
       <h2>Role-scoped Gitea MCP</h2>
       <div class="grid">
-        <a data-port="8771"><strong>Mayor MCP</strong><span>Planning and issue updates</span></a>
-        <a data-port="8772"><strong>Observer MCP</strong><span>Read-only inspection</span></a>
-        <a data-port="8773"><strong>Witness MCP</strong><span>QA evidence and labels</span></a>
+        <a data-port="8771" data-path="/mcp"><strong>Mayor MCP</strong><span>Planning and issue updates · protocol endpoint</span></a>
+        <a data-port="8772" data-path="/mcp"><strong>Observer MCP</strong><span>Read-only inspection · protocol endpoint</span></a>
+        <a data-port="8773" data-path="/mcp"><strong>Witness MCP</strong><span>QA evidence and labels · protocol endpoint</span></a>
       </div>
     </section>
   </main>
   <script>
     for (const link of document.querySelectorAll('[data-port]')) {
-      link.href = `${location.protocol}//${location.hostname}:${link.dataset.port}/`;
+      link.href = `${location.protocol}//${location.hostname}:${link.dataset.port}${link.dataset.path || '/'}`;
     }
   </script>
 </body>
