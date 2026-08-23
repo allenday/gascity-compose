@@ -189,7 +189,7 @@ services:
     build:
       # A local checkout may override this for development. The public default
       # is an immutable Git build context, so a fresh Compose clone is complete.
-      context: ${GASCITY_MCP_DIR:-https://github.com/cyberstorm-dev/gascity-mcp.git#7eb36b0cb404f1e69faaa2796ff5db841a56d067}
+      context: ${GASCITY_MCP_DIR:-https://github.com/cyberstorm-dev/gascity-mcp.git#c3585886676ec3ac20f561bfb82235d5278b92c6}
     environment:
       GASCITY_API_URL: http://city:8372
       GASCITY_API_HOST: 127.0.0.1:8372

@@ -263,11 +263,12 @@ final prompt/completion usage counters.
 `gascity-mcp` is built from an immutable `cyberstorm-dev/gascity-mcp` Git context and offers the
 same read-only typed operations over `/mcp`. Set `GASCITY_MCP_DIR` to a local checkout only when
 developing the adapter. Its surface includes bounded health, status, agent, rig, run, and run-step
-reads; run graphs, event feeds, bead metadata, and mutations remain deliberately excluded. Its
-direct Docker endpoint is bound to localhost and Nginx proxies it only onto the configured
-Tailnet address; it is not a general unauthenticated remote supervisor-control API. The standalone
-`mcp-agent-mail` service is the upstream Gas City-compatible inter-agent mail bridge, not a City
-administration MCP.
+reads; run graphs, event feeds, bead metadata, and mutations remain deliberately excluded from the
+public MCP/CLI registry. The library does contain a narrow, non-public `close_bead` client method
+for a future capability-token-gated delivery bridge after policy authorizes an exact blocked step;
+it is not a general City write surface. The direct Docker endpoint is bound to localhost and Nginx
+proxies it only onto the configured Tailnet address. The standalone `mcp-agent-mail` service is the
+upstream Gas City-compatible inter-agent mail bridge, not a City administration MCP.
 
 The companion `cyberstorm-dev/gascity-gitea` repository currently provides the tested
 `DeliveryBinding` reconciliation library and read-only `DecisionPolicy` evidence verification.
