@@ -204,6 +204,42 @@ services:
         required: false
     restart: unless-stopped
 
+  # One explicit City run -> one explicit Gitea issue. This first bridge is
+  # status-only and has no gate-resolution, bead-close, or issue-close authority.
+  gitea-bridge:
+    profiles: [gitea-bridge]
+    build:
+      context: ${GASCITY_GITEA_DIR:-../gascity-gitea}
+      args:
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-023b11a7fd93d6c8b4ac2eba4f709a027ab75898}
+      dockerfile_inline: |
+        FROM golang:1.24-bookworm AS build
+        ARG GASCITY_GITEA_REF
+        WORKDIR /src
+        COPY . .
+        RUN test "$$(git rev-parse HEAD)" = "$${GASCITY_GITEA_REF}" \
+            && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/gitea-bridge ./cmd/gitea-bridge
+        FROM alpine:3.22
+        RUN apk add --no-cache ca-certificates
+        COPY --from=build /out/gitea-bridge /usr/local/bin/gitea-bridge
+        USER 65534:65534
+        ENTRYPOINT ["gitea-bridge"]
+    environment:
+      GITEA_URL: http://gitea:3000
+      GITEA_TOKEN: ${GITEA_BRIDGE_TOKEN:-}
+      GITEA_ISSUE_URL: ${GITEA_BRIDGE_ISSUE_URL:-}
+      GASCITY_API_URL: http://city:8372
+      GASCITY_CITY_NAME: ${CITY_NAME:-my-city}
+      GASCITY_RUN_ID: ${GASCITY_BRIDGE_RUN_ID:-}
+      BRIDGE_INTERVAL_SECONDS: ${GITEA_BRIDGE_INTERVAL_SECONDS:-30}
+    depends_on:
+      gitea:
+        condition: service_healthy
+      city:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
   # Official Gitea MCP instances are separated by the three permission classes
   # Gas City actually uses. City transition policy remains in the non-MCP
   # gitea-bridge controller.

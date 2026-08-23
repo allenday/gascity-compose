@@ -270,16 +270,26 @@ it is not a general City write surface. The direct Docker endpoint is bound to l
 proxies it only onto the configured Tailnet address. The standalone `mcp-agent-mail` service is the
 upstream Gas City-compatible inter-agent mail bridge, not a City administration MCP.
 
-The companion `cyberstorm-dev/gascity-gitea` repository currently provides the tested
+The companion `cyberstorm-dev/gascity-gitea` repository provides the tested
 `DeliveryBinding` reconciliation library and read-only `DecisionPolicy` evidence verification.
 The latter requires a configured approval label and verifies that its newest matching timeline
 event came from an authorized Gitea actor. Its capability-scoped `ResolveApprovedGate` boundary
 can invoke an injected resolver only for an exact City/run/step-bead identity after acceptance
 checks and tracker revalidation, using a canonical idempotency key. That explicit step-bead target
 matches `gascity-mcp`'s private `close_bead` capability without broadening its public MCP surface.
-The repository still has no City HTTP adapter, durable reconciliation loop, executable, or
-container entrypoint. Consequently it is not yet a Compose service or image pin; gate resolution
-also remains separate from issue and parent-run finalization.
+The pinned `gitea-bridge` Compose profile builds from `GASCITY_GITEA_DIR` and runs its new
+single-binding status daemon. Because the source repository is private, clone it beside this
+repository (or set an absolute checkout path); the image build verifies that its HEAD matches
+`GASCITY_GITEA_REF`. Configure a dedicated restricted `GITEA_BRIDGE_TOKEN`, one canonical
+`GITEA_BRIDGE_ISSUE_URL`, and one `GASCITY_BRIDGE_RUN_ID`, then start it alongside the City:
+
+```bash
+docker compose --profile city --profile gitea-bridge up -d --build gitea-bridge
+```
+
+This daemon reads the selected run and steps and updates only its managed Gitea status comment.
+It deliberately does not wire the library's gate resolver or MCP's private `close_bead` method;
+it has no bead-close, issue-close, parent-run finalization, or general City mutation authority.
 
 ### Role-scoped Gitea MCP
 
