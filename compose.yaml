@@ -1,6 +1,40 @@
 name: gascity
 
 services:
+  # Single Tailnet-facing ingress. Every application remains published on
+  # loopback as well; Nginx is the only listener on the Tailnet address.
+  nginx:
+    image: nginx:1.29.1-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+    ports:
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:80:80"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GRAFANA_PORT:-3000}:3000"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GITEA_HTTP_PORT:-3002}:3002"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GATUS_PORT:-8081}:8081"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${PROMETHEUS_PORT:-9090}:9090"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${LOKI_PORT:-3100}:3100"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:4318:4318"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:8372:8372"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${OLLAMA_PORT:-11435}:11435"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GASCITY_MCP_PORT:-8766}:8766"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GITEA_MCP_MAYOR_PORT:-8771}:8771"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GITEA_MCP_OBSERVER_PORT:-8772}:8772"
+      - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GITEA_MCP_WITNESS_PORT:-8773}:8773"
+    depends_on:
+      grafana:
+        condition: service_started
+      gitea:
+        condition: service_healthy
+      gatus:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
     profiles: [city]
@@ -24,6 +58,14 @@ services:
       # Route inference through the local fork's metrics proxy. The proxy keeps
       # the OpenAI-compatible endpoint intact while recording request usage.
       OLLAMA_HOST: http://ollama-metrics:8080
+      # Used by city.toml's Runpod upstream via a $RUNPOD_API_KEY reference.
+      # Pass it from the host environment when creating/recreating this service;
+      # it is deliberately not committed to the compose environment file.
+      RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+      # Non-secret profile settings rendered into ephemeral CODEX_HOME.
+      TAILNET_OLLAMA_BASE_URL: ${TAILNET_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      RUNPOD_OPENAI_BASE_URL: ${RUNPOD_OPENAI_BASE_URL:-https://api.runpod.ai/v2/not-configured/openai/v1}
+      GEMMA_MODEL: ${GEMMA_MODEL:-gemma4:12b-it-qat}
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
@@ -32,6 +74,7 @@ services:
       - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
       - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
       - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in .env to the host Codex auth file}:/run/secrets/codex-auth.json:ro
+      - ./codex:/run/secrets/codex-config:ro
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
@@ -246,8 +289,8 @@ services:
   grafana:
     image: grafana/grafana:12.1.0
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-${STACK_USERNAME:-admin}}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-${STACK_PASSWORD:?Set STACK_PASSWORD in .env}}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

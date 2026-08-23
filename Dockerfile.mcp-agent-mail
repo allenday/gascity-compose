@@ -3,7 +3,10 @@
 FROM python:3.12-slim
 ARG MCP_AGENT_MAIL_REF=32783f6848bd63c425c4b5004cee3350016635fb
 ENV PYTHONDONTWRITEBYTECODE=1
-RUN pip install --no-cache-dir "mcp-agent-mail @ https://github.com/Dicklesworthstone/mcp_agent_mail/archive/${MCP_AGENT_MAIL_REF}.tar.gz" \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir "mcp-agent-mail @ https://github.com/Dicklesworthstone/mcp_agent_mail/archive/${MCP_AGENT_MAIL_REF}.tar.gz" \
     && useradd -r -m -d /var/lib/mcp-mail -s /usr/sbin/nologin mcp-mail
 USER mcp-mail
 WORKDIR /var/lib/mcp-mail

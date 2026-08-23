@@ -1,0 +1,2 @@
+model = "$GEMMA_MODEL"
+model_provider = "runpod"

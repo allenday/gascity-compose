@@ -10,6 +10,12 @@ mkdir -p "$HOME"
 mkdir -p "${CODEX_HOME:-/run/codex}"
 cp /run/secrets/codex-auth.json "${CODEX_HOME:-/run/codex}/auth.json"
 chmod 0600 "${CODEX_HOME:-/run/codex}/auth.json"
+for template in /run/secrets/codex-config/*.toml.template; do
+  output="${CODEX_HOME:-/run/codex}/$(basename "${template%.template}")"
+  envsubst '$TAILNET_OLLAMA_BASE_URL $RUNPOD_OPENAI_BASE_URL $GEMMA_MODEL' \
+    < "$template" > "$output"
+done
+chmod 0600 "${CODEX_HOME:-/run/codex}"/*.toml
 cat > "$GC_HOME/cities.toml" <<EOF
 [[cities]]
 path = "${CITY_PATH}"

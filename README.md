@@ -35,6 +35,126 @@ City. Stop the existing host supervisor first, then start it in Compose:
 docker compose --profile city up -d --build
 ```
 
+### Cost-safe inference policy
+
+This repository includes an opinionated Gastown role policy at
+`config/city-cost-safe.toml`. It keeps continuous operational roles on the
+`tailnet` Codex profile and reserves the paid `runpod` profile for the Mayor:
+
+| Roles | Default profile |
+| --- | --- |
+| Deacon, Boot, Dog, Witness, Refinery | `tailnet` (local Ollama) |
+| Mayor | `runpod`, `on_demand` |
+| Polecats and other implementation agents | the City workspace provider (normally Codex) |
+
+To apply it, copy the fragment into the City and include it near the top of
+`city.toml`:
+
+```toml
+include = [".gc/compose/city-cost-safe.toml"]
+```
+
+The included Codex profiles are installed into the City container's ephemeral
+`CODEX_HOME` on every start. Runpod remains configured with zero minimum
+workers; an idle City therefore does not require a paid GPU. Before assigning
+the Mayor to a serverless OpenAI-compatible endpoint, verify a complete
+streaming Responses turn, including the terminal `response.completed` event.
+
+Profile endpoints and the shared model name are linked directly to Compose
+variables rather than hard-coded in TOML:
+
+| Variable | Used by | Example |
+| --- | --- | --- |
+| `TAILNET_OLLAMA_BASE_URL` | `tailnet` profile | `http://100.64.0.1:11435/v1` |
+| `RUNPOD_OPENAI_BASE_URL` | `runpod` profile | `https://api.runpod.ai/v2/<id>/openai/v1` |
+| `GEMMA_MODEL` | both profiles | `gemma4:12b-it-qat` |
+| `RUNPOD_API_KEY` | Runpod authentication | supplied from the host environment, not `.env` |
+
+The checked-in files under `codex/` are templates. `city-entrypoint` renders
+them at container startup, so changing a profile is a normal `.env` edit plus
+a City service recreation; no generated TOML is committed.
+
+#### Known-working Runpod Gemma 4 12B QAT deployment
+
+The following 24 GB configuration was established through live deployment and
+inference testing. The important compatibility choices are the pinned Runpod
+vLLM worker and Google's official QAT checkpoint; the stock/current vLLM path
+tested previously was incompatible with this model.
+
+```bash
+template_id="$(runpodctl template create \
+  --serverless \
+  --name gascity-gemma4-vllm-026 \
+  --image runpod/worker-v1-vllm:v2.24.0 \
+  --container-disk-in-gb 40 \
+  --ports '8888/http,22/tcp' \
+  --env '{
+    "MODEL_NAME":"google/gemma-4-12B-it-qat-w4a16-ct",
+    "OPENAI_SERVED_MODEL_NAME_OVERRIDE":"gemma4:12b-it-qat",
+    "MAX_MODEL_LEN":"16384",
+    "GPU_MEMORY_UTILIZATION":"0.90",
+    "MAX_NUM_SEQS":"4",
+    "MAX_CONCURRENCY":"4"
+  }' | jq -r '.id')"
+
+endpoint_id="$(runpodctl serverless create \
+  --name gascity-gemma4-12b-qat \
+  --template-id "$template_id" \
+  --gpu-id 'NVIDIA GeForce RTX 4090' \
+  --gpu-count 1 \
+  --min-cuda-version 12.0 \
+  --workers-min 0 \
+  --workers-max 1 \
+  --idle-timeout 30 \
+  --execution-timeout 900 \
+  --scale-by delay \
+  --scale-threshold 4 \
+  --flash-boot=false | jq -r '.id')"
+
+printf 'RUNPOD_OPENAI_BASE_URL=https://api.runpod.ai/v2/%s/openai/v1\n' \
+  "$endpoint_id"
+```
+
+This exact image/checkpoint combination successfully served
+`gemma4:12b-it-qat` through the OpenAI-compatible `/responses` route on a
+secure-cloud RTX 4090. The endpoint is intentionally scale-to-zero. Do not use
+`workers-min=1` outside a deliberate warm-worker test.
+
+Before putting the endpoint into `.env`, test both a non-streaming response and
+the streaming completion boundary:
+
+```bash
+openai_base="https://api.runpod.ai/v2/${endpoint_id}/openai/v1"
+
+curl -fsS "$openai_base/responses" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma4:12b-it-qat","input":"Reply with exactly OK","stream":false}' \
+  | jq -e '.status == "completed"'
+
+curl -fsSN "$openai_base/responses" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma4:12b-it-qat","input":"Reply with exactly OK","stream":true}' \
+  | tee /tmp/gemma4-responses.sse
+
+grep -q '^event: response.completed' /tmp/gemma4-responses.sse
+```
+
+Treat the final `grep` as a deployment gate. Our one-shot request worked, but
+long-lived Codex sessions later encountered streams closing before
+`response.completed`; retries then accumulated hundreds of serverless jobs.
+The supplied Codex Runpod provider therefore sets both request and stream
+retries to zero. If the streaming gate fails, delete the endpoint rather than
+connecting it to an always-on or unattended agent.
+
+After setting `RUNPOD_OPENAI_BASE_URL`, recreate only the City service to render
+the new profile:
+
+```bash
+docker compose --profile city up -d --build city
+```
+
 The default City mount preserves its original absolute path inside the container. That is required
 because an existing `city.toml` can contain absolute rig and provider paths. Containerizing the
 supervisor does not automatically containerize host-specific providers (such as a wrapper that

@@ -1,12 +1,15 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config up down smoke gitea-mcp-up gitea-mcp-bootstrap
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap
 
 config:
 	$(COMPOSE) config --quiet
 
-up:
+bootstrap:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/bootstrap.sh
+
+up: bootstrap
 	$(COMPOSE) up -d --wait --wait-timeout 90
 
 down:

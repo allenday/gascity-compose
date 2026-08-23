@@ -1,0 +1,18 @@
+# Generated into ephemeral CODEX_HOME by city-entrypoint.
+[model_providers.tailnet]
+name = "Tailnet Ollama"
+base_url = "$TAILNET_OLLAMA_BASE_URL"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+
+[model_providers.runpod]
+name = "Runpod Serverless"
+base_url = "$RUNPOD_OPENAI_BASE_URL"
+env_key = "RUNPOD_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+# Fail closed instead of multiplying paid serverless work after a broken stream.
+request_max_retries = 0
+stream_max_retries = 0

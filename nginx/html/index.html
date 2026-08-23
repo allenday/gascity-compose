@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gas City staging</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #101419; color: #eef2f6; }
+    main { width: min(900px, calc(100% - 2rem)); margin: 4rem auto; }
+    h1 { margin-bottom: .35rem; font-size: 2rem; }
+    .subtitle { margin-top: 0; color: #9eabb8; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    a { display: block; padding: 1.1rem; border: 1px solid #2b3742; border-radius: .7rem; background: #182028; color: inherit; text-decoration: none; }
+    a:hover { border-color: #65a9ff; background: #1c2833; }
+    strong { display: block; margin-bottom: .35rem; }
+    span { color: #9eabb8; font-size: .9rem; }
+    section { margin-top: 2rem; }
+    h2 { color: #b9c5d0; font-size: 1rem; text-transform: uppercase; letter-spacing: .08em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Gas City staging</h1>
+    <p class="subtitle">Tailnet-only service directory</p>
+
+    <section>
+      <h2>Platform</h2>
+      <div class="grid">
+        <a data-port="3000"><strong>Grafana</strong><span>Dashboards and logs</span></a>
+        <a data-port="3002"><strong>Gitea</strong><span>Repositories and issues</span></a>
+        <a data-port="8081"><strong>Gatus</strong><span>Service status</span></a>
+        <a data-port="9090"><strong>Prometheus</strong><span>Metrics and targets</span></a>
+      </div>
+    </section>
+
+    <section>
+      <h2>City and models</h2>
+      <div class="grid">
+        <a data-port="8372"><strong>Gas City API</strong><span>Available with the city profile</span></a>
+        <a data-port="11435"><strong>Ollama</strong><span>Available with the city or models profile</span></a>
+        <a data-port="8766"><strong>Gas City MCP</strong><span>Available with the MCP profile</span></a>
+      </div>
+    </section>
+
+    <section>
+      <h2>Role-scoped Gitea MCP</h2>
+      <div class="grid">
+        <a data-port="8771"><strong>Mayor MCP</strong><span>Planning and issue updates</span></a>
+        <a data-port="8772"><strong>Observer MCP</strong><span>Read-only inspection</span></a>
+        <a data-port="8773"><strong>Witness MCP</strong><span>QA evidence and labels</span></a>
+      </div>
+    </section>
+  </main>
+  <script>
+    for (const link of document.querySelectorAll('[data-port]')) {
+      link.href = `${location.protocol}//${location.hostname}:${link.dataset.port}/`;
+    }
+  </script>
+</body>
+</html>

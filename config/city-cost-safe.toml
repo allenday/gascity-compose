@@ -1,0 +1,50 @@
+# Opinionated inference policy for the Gastown pack.
+#
+# Operational agents run on local/tailnet hardware. The Mayor uses the remote
+# reasoning profile but is materialized only when explicitly addressed or
+# assigned work. Polecats and other implementation agents are intentionally
+# not patched, so they inherit the workspace's capable coding provider.
+
+[providers.codex-tailnet]
+base = "builtin:codex"
+ready_delay_ms = 0
+args_append = ["--profile", "tailnet"]
+options_schema_merge = "by_key"
+options_schema = [{ key = "model", omit = true }]
+
+[providers.codex-runpod]
+base = "builtin:codex"
+ready_delay_ms = 0
+args_append = ["--profile", "runpod"]
+options_schema_merge = "by_key"
+options_schema = [{ key = "model", omit = true }]
+
+[[patches.agent]]
+name = "gastown.deacon"
+provider = "codex-tailnet"
+
+[[patches.agent]]
+name = "gastown.boot"
+provider = "codex-tailnet"
+
+[[patches.agent]]
+name = "gastown.dog"
+provider = "codex-tailnet"
+
+[[patches.agent]]
+name = "gastown.mayor"
+provider = "codex-runpod"
+
+[[patches.agent]]
+rig = "*"
+name = "gastown.witness"
+provider = "codex-tailnet"
+
+[[patches.agent]]
+rig = "*"
+name = "gastown.refinery"
+provider = "codex-tailnet"
+
+[[patches.named_session]]
+name = "gastown.mayor"
+mode = "on_demand"
