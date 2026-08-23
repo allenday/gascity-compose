@@ -103,6 +103,8 @@ endpoint_id="$(runpodctl serverless create \
   --gpu-id 'NVIDIA GeForce RTX 4090' \
   --gpu-count 1 \
   --min-cuda-version 12.0 \
+  --model-reference \
+    'https://huggingface.co/google/gemma-4-12B-it-qat-w4a16-ct:main' \
   --workers-min 0 \
   --workers-max 1 \
   --idle-timeout 30 \
@@ -115,10 +117,25 @@ printf 'RUNPOD_OPENAI_BASE_URL=https://api.runpod.ai/v2/%s/openai/v1\n' \
   "$endpoint_id"
 ```
 
-This exact image/checkpoint combination successfully served
+The model reference is not optional for a reliable scale-to-zero deployment.
+It resolves `main` to an immutable Hugging Face revision and places the weights
+in Runpod's host-side model cache. Without it, cold workers download the model
+themselves; a live recreation failed repeatedly while fetching Hugging Face
+metadata and cycled paid workers without serving its one queued request.
+
+This exact image/checkpoint/cache combination successfully served
 `gemma4:12b-it-qat` through the OpenAI-compatible `/responses` route on a
 secure-cloud RTX 4090. The endpoint is intentionally scale-to-zero. Do not use
 `workers-min=1` outside a deliberate warm-worker test.
+
+Observed acceptance results on 2026-08-23:
+
+- cache reference pinned to revision `1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee`;
+- the 9.56 GiB checkpoint loaded in 2.69 seconds from cache;
+- asynchronous cold warm-up completed after 301 seconds of delay and 1.64
+  seconds of execution;
+- warm non-streaming `/responses` returned `status=completed`;
+- warm streaming `/responses` emitted the terminal `response.completed` event.
 
 Before putting the endpoint into `.env`, test both a non-streaming response and
 the streaming completion boundary:
