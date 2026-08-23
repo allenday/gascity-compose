@@ -260,10 +260,19 @@ The proxy is scraped by Prometheus and its upstream-provided Grafana dashboard i
 `INCLUDE_STREAM_USAGE=true` is enabled only for the proxy so streaming City requests provide their
 final prompt/completion usage counters.
 
-`gascity-mcp` comes from the sibling `cyberstorm-dev/gascity-mcp` checkout (`GASCITY_MCP_DIR`) and
-offers the same read-only typed operations over `/mcp`. Its Docker endpoint is bound to localhost
-only; it is not an unauthenticated remote supervisor-control API. The standalone `mcp-agent-mail`
-service is the upstream Gas City-compatible inter-agent mail bridge, not a City administration MCP.
+`gascity-mcp` is built from an immutable `cyberstorm-dev/gascity-mcp` Git context and offers the
+same read-only typed operations over `/mcp`. Set `GASCITY_MCP_DIR` to a local checkout only when
+developing the adapter. Its surface includes bounded health, status, agent, rig, run, and run-step
+reads; run graphs, event feeds, bead metadata, and mutations remain deliberately excluded. Its
+direct Docker endpoint is bound to localhost and Nginx proxies it only onto the configured
+Tailnet address; it is not a general unauthenticated remote supervisor-control API. The standalone
+`mcp-agent-mail` service is the upstream Gas City-compatible inter-agent mail bridge, not a City
+administration MCP.
+
+The companion `cyberstorm-dev/gascity-gitea` repository currently provides the tested
+`DeliveryBinding` reconciliation library, not a daemon or container entrypoint. Consequently it
+is not yet a Compose service or image pin: a deployable bridge needs the still-missing polling and
+City HTTP adapter boundary first.
 
 ### Role-scoped Gitea MCP
 
