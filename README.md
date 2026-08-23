@@ -74,6 +74,44 @@ The checked-in files under `codex/` are templates. `city-entrypoint` renders
 them at container startup, so changing a profile is a normal `.env` edit plus
 a City service recreation; no generated TOML is committed.
 
+### Opinionated Superpowers builds
+
+Fresh and existing mounted cities automatically receive the pinned
+[`superpowers`](https://github.com/gastownhall/gascity-packs/tree/main/superpowers)
+pack unless `SUPERPOWERS_PACK_ENABLED=false` is set. The recommended build
+formula is `superpowers-build`; use `build-basic` when the extra specification,
+TDD, and review stages are not worth their additional inference cost.
+
+`superpowers-build` extends Gas City's `build-base`; it does not extend
+Gastown. Gastown supplies the continuously operating Mayor, Deacon, Witness,
+and related city roles, while Superpowers supplies the build workflow and its
+rig-scoped implementation and review roles.
+
+The pack vendors its Superpowers skills and Gas City materializes the relevant
+material for each workflow lane. Do not separately install a Codex
+Superpowers skill: Codex workers and OpenAI-compatible models such as Gemma
+receive the same versioned instructions from the pack. Provider-native
+subagent calls are translated into Gas City graph lanes, beads, and convoys.
+
+The source and immutable pin are explicit upgrade controls:
+
+| Variable | Default |
+| --- | --- |
+| `SUPERPOWERS_PACK_ENABLED` | `true` |
+| `SUPERPOWERS_PACK_SOURCE` | `https://github.com/gastownhall/gascity-packs/tree/main/superpowers` |
+| `SUPERPOWERS_PACK_VERSION` | `sha:3b3b89f2011e06d84459aa7bea1552382f13930a` |
+
+For example, after creating a target bead in a rig:
+
+```bash
+gc sling gc.run-operator <bead-id> --on superpowers-build \
+  --var artifact_root=plans/<change>/build \
+  --var drain_policy=separate
+```
+
+This import is additive: `build-basic` remains available, and an existing
+`imports.superpowers` binding is never overwritten by container startup.
+
 #### Known-working Runpod Gemma 4 12B QAT deployment
 
 The following 24 GB configuration was established through live deployment and

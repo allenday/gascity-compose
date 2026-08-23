@@ -66,6 +66,11 @@ services:
       TAILNET_OLLAMA_BASE_URL: ${TAILNET_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       RUNPOD_OPENAI_BASE_URL: ${RUNPOD_OPENAI_BASE_URL:-https://api.runpod.ai/v2/not-configured/openai/v1}
       GEMMA_MODEL: ${GEMMA_MODEL:-gemma4:12b-it-qat}
+      # Batteries-included build methodology. The pack itself materializes its
+      # vendored skills for every provider; no Codex-only skill install is needed.
+      SUPERPOWERS_PACK_ENABLED: ${SUPERPOWERS_PACK_ENABLED:-true}
+      SUPERPOWERS_PACK_SOURCE: ${SUPERPOWERS_PACK_SOURCE:-https://github.com/gastownhall/gascity-packs/tree/main/superpowers}
+      SUPERPOWERS_PACK_VERSION: ${SUPERPOWERS_PACK_VERSION:-sha:3b3b89f2011e06d84459aa7bea1552382f13930a}
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}

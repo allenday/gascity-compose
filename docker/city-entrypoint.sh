@@ -38,6 +38,18 @@ if ! dolt config --global --get user.email >/dev/null 2>&1; then
   dolt config --global --add user.email "${DOLT_USER_EMAIL:-allenday@allenday.com}"
 fi
 
+# Superpowers is the opinionated build methodology for this deployment. Its
+# pack vendors provider-neutral skills which Gas City materializes for each
+# lane, so Codex and OpenAI-compatible agents receive the same methodology.
+# Existing cities remain free to manage or replace an already-declared binding.
+if [ "${SUPERPOWERS_PACK_ENABLED:-true}" = "true" ] && \
+   ! grep -Eq '^[[:space:]]*\[imports\.superpowers\][[:space:]]*$' "$CITY_PATH/pack.toml"; then
+  gc --city "$CITY_PATH" import add \
+    "${SUPERPOWERS_PACK_SOURCE:-https://github.com/gastownhall/gascity-packs/tree/main/superpowers}" \
+    --name superpowers \
+    --version "${SUPERPOWERS_PACK_VERSION:-sha:3b3b89f2011e06d84459aa7bea1552382f13930a}"
+fi
+
 # The city lockfile pins remote packs but the controller cache lives in the
 # Compose runtime mount, not in the source checkout. Populate it on every
 # start; gc import install is idempotent when the lock is already cached.
