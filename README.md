@@ -270,9 +270,11 @@ Tailnet address; it is not a general unauthenticated remote supervisor-control A
 administration MCP.
 
 The companion `cyberstorm-dev/gascity-gitea` repository currently provides the tested
-`DeliveryBinding` reconciliation library, not a daemon or container entrypoint. Consequently it
-is not yet a Compose service or image pin: a deployable bridge needs the still-missing polling and
-City HTTP adapter boundary first.
+`DeliveryBinding` reconciliation library and read-only `DecisionPolicy` evidence verification.
+The latter requires a configured approval label and verifies that its newest matching timeline
+event came from an authorized Gitea actor. It remains evidence production—not a resolver, daemon,
+or container entrypoint. Consequently it is not yet a Compose service or image pin: a deployable
+bridge still needs polling, City HTTP/mutation adapters, idempotency, and finalization policy.
 
 ### Role-scoped Gitea MCP
 
