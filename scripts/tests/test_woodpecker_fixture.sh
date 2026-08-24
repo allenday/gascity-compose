@@ -52,7 +52,7 @@ trap 'rm -f "$rendered"' EXIT
 docker compose --env-file "$root/.env.example" --profile woodpecker config >"$rendered"
 require 'WOODPECKER_EXPERT_FORGE_OAUTH_HOST: http://127\.0\.0\.1:3002' "$rendered"
 require 'WOODPECKER_EXPERT_WEBHOOK_HOST: http://woodpecker-server:8000' "$rendered"
-require 'GITEA__security__ALLOWED_HOST_LIST: private,loopback' "$rendered"
+require 'GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server' "$rendered"
 require 'WOODPECKER_OPEN: "false"' "$rendered"
 require 'WOODPECKER_ADMIN: woodpecker-fixture' "$rendered"
 require 'WOODPECKER_ENVIRONMENT: GITEA_FIXTURE_PACKAGE_TOKEN:' "$rendered"
@@ -72,6 +72,20 @@ require 'user/repos' "$fixture"
 require '\.woodpecker\.yml' "$fixture"
 require 'api/packages/.*/generic/' "$fixture"
 require 'CI_COMMIT_SHA' "$fixture"
+require 'fixture_pipeline()' "$fixture"
+require 'PIPELINE_EOF' "$fixture"
+require '\-X PUT' "$fixture"
+require 'existing_sha' "$fixture"
+pipeline_yaml="$(awk '
+  /^fixture_pipeline\(\)/ { capture = 1; next }
+  capture && /^when:/ { body = 1 }
+  capture && /^PIPELINE_EOF$/ { exit }
+  body { print }
+' "$fixture")"
+if ! printf '%s\n' "$pipeline_yaml" | ruby -e 'require "yaml"; YAML.safe_load(STDIN.read)'; then
+  printf '%s\n' 'fixture pipeline must be valid YAML' >&2
+  exit 1
+fi
 if grep -Eq 'STACK_PASSWORD|GITEA_MAYOR_TOKEN|GITEA_BRIDGE_TOKEN' "$fixture"; then
   printf 'fixture must not consume privileged Gitea credentials\n' >&2
   exit 1
@@ -87,6 +101,8 @@ require 'api/healthz' "$root/scripts/woodpecker-smoke.sh"
 require 'woodpecker-acceptance' "$root/Makefile"
 require 'hooks/.*/deliveries' "$root/scripts/woodpecker-acceptance.sh"
 require 'generic/gascity-compose-fixture' "$root/scripts/woodpecker-acceptance.sh"
+require 'statuses/\$commit_sha' "$root/scripts/woodpecker-acceptance.sh"
+require 'fromjson.*after' "$root/scripts/woodpecker-acceptance.sh"
 require 'WOODPECKER_GITEA_BROWSER_URL=' "$root/.env.example"
 require 'GITEA_WOODPECKER_PACKAGE_TOKEN=' "$root/.env.example"
 

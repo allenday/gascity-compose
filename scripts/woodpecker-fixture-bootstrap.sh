@@ -97,7 +97,9 @@ if ! curl --fail --silent --show-error -H "Authorization: token $fixture_token" 
     --data "$(jq -nc --arg name "$fixture_repo" '{name:$name,private:true,auto_init:true,default_branch:"main"}')" >/dev/null
 fi
 
-pipeline='when:
+fixture_pipeline() {
+  cat <<'PIPELINE_EOF'
+when:
   - event: [push, manual]
 steps:
   fixture:
@@ -108,17 +110,30 @@ steps:
       - artifact="fixture-$CI_COMMIT_SHA.txt"
       - printf "fixture artifact for %s\\n" "$CI_COMMIT_SHA" > "$artifact"
       - curl --fail --user "woodpecker-fixture:$GITEA_FIXTURE_PACKAGE_TOKEN" --upload-file "$artifact" "http://gitea:3000/api/packages/woodpecker-fixture/generic/gascity-compose-fixture/$CI_COMMIT_SHA/$artifact"
-      - printf "run URL: %s\\n" "$CI_PIPELINE_URL"
-      - printf "artifact URL: %s/api/packages/woodpecker-fixture/generic/gascity-compose-fixture/%s/%s\\n" "$GITEA_FIXTURE_PUBLIC_URL" "$CI_COMMIT_SHA" "$artifact"
-'
+      - 'printf "run URL: %s\\n" "$CI_PIPELINE_URL"'
+      - 'printf "artifact URL: %s/api/packages/woodpecker-fixture/generic/gascity-compose-fixture/%s/%s\\n" "$GITEA_FIXTURE_PUBLIC_URL" "$CI_COMMIT_SHA" "$artifact"'
+PIPELINE_EOF
+}
+pipeline="$(fixture_pipeline)"
 encoded_pipeline="$(printf '%s' "$pipeline" | base64 | tr -d '\n')"
-if ! curl --fail --silent --show-error -H "Authorization: token $fixture_token" \
-  "$gitea_api/repos/${fixture_user}/${fixture_repo}/contents/.woodpecker.yml" >/dev/null 2>&1; then
+existing_pipeline="$(curl --silent --show-error -H "Authorization: token $fixture_token" \
+  "$gitea_api/repos/${fixture_user}/${fixture_repo}/contents/.woodpecker.yml" 2>/dev/null || true)"
+existing_content="$(printf '%s' "$existing_pipeline" | jq -r '.content // empty' | tr -d '\n')"
+existing_sha="$(printf '%s' "$existing_pipeline" | jq -r '.sha // empty')"
+if [ "$existing_content" != "$encoded_pipeline" ]; then
+  if [ -n "$existing_sha" ]; then
+    curl --fail --silent --show-error \
+      -H "Authorization: token $fixture_token" \
+      -H 'Content-Type: application/json' \
+      -X PUT "$gitea_api/repos/${fixture_user}/${fixture_repo}/contents/.woodpecker.yml" \
+      --data "$(jq -nc --arg content "$encoded_pipeline" --arg sha "$existing_sha" '{content:$content,message:"Reconcile Woodpecker fixture pipeline",branch:"main",sha:$sha}')" >/dev/null
+  else
   curl --fail --silent --show-error \
     -H "Authorization: token $fixture_token" \
     -H 'Content-Type: application/json' \
     -X POST "$gitea_api/repos/${fixture_user}/${fixture_repo}/contents/.woodpecker.yml" \
-    --data "$(jq -nc --arg content "$encoded_pipeline" '{content:$content,message:"Add Woodpecker fixture pipeline",branch:"main"}')" >/dev/null
+      --data "$(jq -nc --arg content "$encoded_pipeline" '{content:$content,message:"Add Woodpecker fixture pipeline",branch:"main"}')" >/dev/null
+  fi
 fi
 
 if [ -z "$(value_for WOODPECKER_AGENT_SECRET)" ]; then

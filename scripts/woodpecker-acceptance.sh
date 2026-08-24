@@ -25,6 +25,8 @@ fixture_repo="$(value_for WOODPECKER_FIXTURE_REPOSITORY)"
 fixture_repo="${fixture_repo:-gascity-compose-fixture}"
 fixture_token="$(require_value GITEA_WOODPECKER_TOKEN)"
 package_token="$(require_value GITEA_WOODPECKER_PACKAGE_TOKEN)"
+woodpecker_host="$(value_for WOODPECKER_HOST)"
+woodpecker_host="${woodpecker_host:-http://127.0.0.1:8000}"
 gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
 package_api="http://127.0.0.1:${gitea_port}/api/packages"
 
@@ -34,30 +36,24 @@ hook_id="$(curl --fail --silent --show-error \
   -H "Authorization: token $fixture_token" \
   "$gitea_api/repos/${fixture_user}/${fixture_repo}/hooks" | \
   jq -er '[.[] | select(.config.url | startswith("http://woodpecker-server:8000"))] | last.id')"
-curl --fail --silent --show-error \
+delivery="$(curl --fail --silent --show-error \
   -H "Authorization: token $fixture_token" \
   "$gitea_api/repos/${fixture_user}/${fixture_repo}/hooks/${hook_id}/deliveries" | \
-  jq -e 'any(.[]; .response.status >= 200 and .response.status < 300)' >/dev/null
+  jq -cer '[.[] | select(.response.status >= 200 and .response.status < 300)] | sort_by(.delivered_at) | last')"
+commit_sha="$(printf '%s' "$delivery" | jq -er '.request.body | fromjson | .after')"
+case "$commit_sha" in ''|*[!0-9a-f]*) exit 1;; esac
+if [ "${#commit_sha}" -ne 40 ]; then exit 1; fi
+run_url="$(curl --fail --silent --show-error \
+  -H "Authorization: token $fixture_token" \
+  "$gitea_api/repos/${fixture_user}/${fixture_repo}/statuses/$commit_sha" | \
+  jq -er --arg host "$woodpecker_host" '[.[] | select(.state == "success" and (.target_url | startswith($host))) | .target_url] | first')"
 
 # The fixture uses the commit SHA as the immutable package version. Download
 # the retained file through the loopback-published package registry.
-artifact_version="$(curl --fail --silent --show-error \
-  -H "Authorization: token $fixture_token" \
-  "$gitea_api/packages/${fixture_user}?type=generic" | \
-  jq -er '[.[] | select(.name == "gascity-compose-fixture")] | sort_by(.created_at) | last.version')"
-case "$artifact_version" in
-  ''|*[!0-9a-f]*)
-    printf '%s\n' "ERROR: artifact version is not an immutable commit SHA: $artifact_version" >&2
-    exit 1
-    ;;
-esac
-if [ "${#artifact_version}" -ne 40 ]; then
-  printf '%s\n' "ERROR: artifact version is not an immutable commit SHA: $artifact_version" >&2
-  exit 1
-fi
+artifact_version="$commit_sha"
 artifact="fixture-${artifact_version}.txt"
 artifact_url="${package_api}/${fixture_user}/generic/gascity-compose-fixture/${artifact_version}/${artifact}"
 curl --fail --silent --show-error --user "${fixture_user}:${package_token}" "$artifact_url" | \
   grep -Fx "fixture artifact for ${artifact_version}" >/dev/null
 
-printf '%s\n' "PASS: delivered Woodpecker webhook and retained immutable artifact ${artifact_url}"
+printf '%s\n' "PASS: ${run_url} handled commit ${commit_sha} and retained artifact ${artifact_url}"

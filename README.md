@@ -390,8 +390,8 @@ whose package version is the immutable commit SHA, and publishes it to Gitea's
 generic package registry. Its generated Gitea password is stored as
 `GITEA_WOODPECKER_PASSWORD` in the ignored `.env`; use it to sign into
 `http://127.0.0.1:8000` through Gitea as the fixture user, activate that
-repository, and run it manually (or push a fixture change). Then confirm the
-actual Gitea webhook delivery and retrieve the retained artifact:
+repository, and push a fixture change. Then confirm that same Gitea webhook
+delivery, successful Woodpecker run, and retained artifact:
 
 ```bash
 make woodpecker-acceptance ENV_FILE=.env
