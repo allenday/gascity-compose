@@ -358,9 +358,12 @@ for least-privilege tokens and repository membership. These endpoints bind only 
 host-process agents are separated by configuration rather than a hard OS boundary.
 In particular, Gitea's `write:issue` token scope also covers some destructive raw-API issue
 operations; agents only see the selected MCP tools, but a stolen PAT could otherwise call Gitea
-directly. The future Woodpecker integration is an evidence producer: its immutable run and artifact
-URLs will be reflected by the bridge into the managed status comment, but Woodpecker is not part of
-this Compose file yet.
+directly. The pinned library now also offers a `woodpecker.AcceptanceVerifier` for a future
+resolution controller. It uses a dedicated Woodpecker PAT and one explicitly pinned pipeline number,
+then emits evidence only when that finished successful pipeline and its repository URL exactly match
+the delivery binding's immutable source revision. It is not instantiated by `gitea-bridge`: this
+Compose file neither deploys Woodpecker nor defines its credentials, pipeline selection, mutation,
+or finalization authority.
 
 ## Monitoring notes
 
