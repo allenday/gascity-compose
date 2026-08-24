@@ -305,6 +305,11 @@ canonical repository URL plus a full Git object ID or `sha256:` digest. Mutable 
 evidence for any other revision are rejected, so a passing build cannot authorize closure of work
 for a different source state.
 
+The library also offers evidence-gated issue finalization, but this profile does not instantiate
+it. Finalization requires the bound run and every step to be completed, fresh acceptance for the
+binding's immutable source, and a current authorized tracker decision. It cannot infer completion
+from a prior gate resolution, and it remains separate from the deployed status projection.
+
 Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
 
 ```bash
