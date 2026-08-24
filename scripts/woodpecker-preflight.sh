@@ -20,5 +20,6 @@ require_value() {
 require_value WOODPECKER_AGENT_SECRET
 require_value WOODPECKER_GITEA_CLIENT
 require_value WOODPECKER_GITEA_SECRET
+require_value GITEA_WOODPECKER_PACKAGE_TOKEN
 
 printf '%s\n' 'PASS: Woodpecker credentials are present'

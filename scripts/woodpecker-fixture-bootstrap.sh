@@ -63,6 +63,16 @@ if [ -z "$fixture_token" ]; then
   upsert GITEA_WOODPECKER_TOKEN "$fixture_token"
 fi
 
+package_token="$(value_for GITEA_WOODPECKER_PACKAGE_TOKEN)"
+if [ -z "$package_token" ]; then
+  package_token="$(compose exec -T gitea gitea admin user generate-access-token \
+    --username "$fixture_user" \
+    --token-name woodpecker-fixture-package \
+    --scopes write:package | awk -F': ' 'END { print $NF }')"
+  test -n "$package_token"
+  upsert GITEA_WOODPECKER_PACKAGE_TOKEN "$package_token"
+fi
+
 gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
 oauth_client="$(value_for WOODPECKER_GITEA_CLIENT)"
 oauth_secret="$(value_for WOODPECKER_GITEA_SECRET)"
@@ -94,7 +104,12 @@ steps:
     image: alpine:3.20
     commands:
       - test -f README.md
-      - printf "fixture pipeline passed\\n"
+      - apk add --no-cache curl
+      - artifact="fixture-$CI_COMMIT_SHA.txt"
+      - printf "fixture artifact for %s\\n" "$CI_COMMIT_SHA" > "$artifact"
+      - curl --fail --user "woodpecker-fixture:$GITEA_FIXTURE_PACKAGE_TOKEN" --upload-file "$artifact" "http://gitea:3000/api/packages/woodpecker-fixture/generic/gascity-compose-fixture/$CI_COMMIT_SHA/$artifact"
+      - printf "run URL: %s\\n" "$CI_PIPELINE_URL"
+      - printf "artifact URL: %s/api/packages/woodpecker-fixture/generic/gascity-compose-fixture/%s/%s\\n" "$GITEA_FIXTURE_PUBLIC_URL" "$CI_COMMIT_SHA" "$artifact"
 '
 encoded_pipeline="$(printf '%s' "$pipeline" | base64 | tr -d '\n')"
 if ! curl --fail --silent --show-error -H "Authorization: token $fixture_token" \

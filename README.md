@@ -385,11 +385,17 @@ make woodpecker-smoke ENV_FILE=.env
 
 Bootstrap creates the regular `woodpecker-fixture` account and private
 `gascity-compose-fixture` repository. That repository contains a single
-Alpine `.woodpecker.yml` which checks out its `README.md` and prints a success
-marker. Its generated Gitea password is stored as `GITEA_WOODPECKER_PASSWORD`
-in the ignored `.env`; use it to sign into `http://127.0.0.1:8000` through
-Gitea as the fixture user, activate that repository, and run it manually (or
-push a fixture change).
+Alpine `.woodpecker.yml` which checks out its `README.md`, writes an artifact
+whose package version is the immutable commit SHA, and publishes it to Gitea's
+generic package registry. Its generated Gitea password is stored as
+`GITEA_WOODPECKER_PASSWORD` in the ignored `.env`; use it to sign into
+`http://127.0.0.1:8000` through Gitea as the fixture user, activate that
+repository, and run it manually (or push a fixture change). Then confirm the
+actual Gitea webhook delivery and retrieve the retained artifact:
+
+```bash
+make woodpecker-acceptance ENV_FILE=.env
+```
 
 The server binds only to loopback, accepts only the fixture owner by default,
 and runs one workflow at a time. The Docker agent necessarily owns the Docker
@@ -400,7 +406,8 @@ workflow network is deliberately separate and uses the `gitea` service name
 for API and clone traffic; the browser OAuth flow instead uses
 `WOODPECKER_GITEA_BROWSER_URL` (loopback Gitea by default). Gitea sends its
 webhooks to Woodpecker's internal service address, which is intentionally
-separate from the browser URL. For an external deployment, set both
+separate from the browser URL. Registration stays closed; only the configured
+fixture admin is admitted. For an external deployment, set both
 `WOODPECKER_HOST` and `WOODPECKER_GITEA_BROWSER_URL` to their stable HTTPS
 browser URLs before bootstrapping the OAuth client, while keeping
 `WOODPECKER_GITEA_URL` and the internal webhook route on Docker-only service

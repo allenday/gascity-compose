@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke test
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -44,6 +44,9 @@ woodpecker-up: bootstrap woodpecker-fixture-bootstrap woodpecker-preflight
 
 woodpecker-smoke:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-smoke.sh
+
+woodpecker-acceptance:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-acceptance.sh
 
 test:
 	sh ./scripts/tests/test_woodpecker_fixture.sh

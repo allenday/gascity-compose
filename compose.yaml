@@ -159,10 +159,10 @@ services:
       GITEA__security__INSTALL_LOCK: "true"
       GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
-      # Gitea calls Woodpecker from inside the Compose network. Keep the
-      # allow-list narrow: browsers remain loopback-only and only the CI
-      # server service name is accepted as a webhook destination.
-      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server
+      # Gitea applies this security allow-list to OAuth and webhooks. Its
+      # `private` class permits the Docker-private Woodpecker service without
+      # exposing either service beyond loopback on the host.
+      GITEA__security__ALLOWED_HOST_LIST: private,loopback
       GITEA__log__LEVEL: info
     ports:
       - "127.0.0.1:${GITEA_HTTP_PORT:-3002}:3000"
@@ -203,6 +203,9 @@ services:
       WOODPECKER_GITEA_SECRET: ${WOODPECKER_GITEA_SECRET:-}
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
       WOODPECKER_REPO_OWNERS: ${WOODPECKER_REPO_OWNERS:-woodpecker-fixture}
+      # The profile admits only its configured admin while registration is
+      # closed; this package token is available only to that fixture's runs.
+      WOODPECKER_ENVIRONMENT: GITEA_FIXTURE_PACKAGE_TOKEN:${GITEA_WOODPECKER_PACKAGE_TOKEN:-},GITEA_FIXTURE_PUBLIC_URL:${WOODPECKER_GITEA_BROWSER_URL:-http://127.0.0.1:${GITEA_HTTP_PORT:-3002}}
       WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: ${WOODPECKER_PIPELINE_TIMEOUT:-15m}
       WOODPECKER_LOG_LEVEL: warn
     volumes:
