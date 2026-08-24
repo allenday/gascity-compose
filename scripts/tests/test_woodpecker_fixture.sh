@@ -99,10 +99,14 @@ require 'woodpecker-preflight' "$root/Makefile"
 require 'gascity-woodpecker' "$root/scripts/woodpecker-smoke.sh"
 require 'api/healthz' "$root/scripts/woodpecker-smoke.sh"
 require 'woodpecker-acceptance' "$root/Makefile"
-require 'hooks/.*/deliveries' "$root/scripts/woodpecker-acceptance.sh"
+require 'branches/' "$root/scripts/woodpecker-acceptance.sh"
 require 'generic/gascity-compose-fixture' "$root/scripts/woodpecker-acceptance.sh"
 require 'statuses/\$commit_sha' "$root/scripts/woodpecker-acceptance.sh"
-require 'fromjson.*after' "$root/scripts/woodpecker-acceptance.sh"
+require '\.status == "success"' "$root/scripts/woodpecker-acceptance.sh"
+if grep -Eq 'hooks/.*/deliveries|\.state == "success"' "$root/scripts/woodpecker-acceptance.sh"; then
+  printf '%s\n' 'acceptance must use supported Gitea API fields and routes' >&2
+  exit 1
+fi
 require 'WOODPECKER_GITEA_BROWSER_URL=' "$root/.env.example"
 require 'GITEA_WOODPECKER_PACKAGE_TOKEN=' "$root/.env.example"
 

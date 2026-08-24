@@ -30,23 +30,23 @@ woodpecker_host="${woodpecker_host:-http://127.0.0.1:8000}"
 gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
 package_api="http://127.0.0.1:${gitea_port}/api/packages"
 
-# Repository activation creates this Woodpecker-owned callback. A successful
-# delivery proves Gitea can reach the internal webhook URL from its container.
+# Repository activation creates this Woodpecker-owned callback. Gitea 1.27
+# exposes hook registration but not delivery history via REST, so correlate the
+# registered callback with Woodpecker's successful status on the branch head.
 hook_id="$(curl --fail --silent --show-error \
   -H "Authorization: token $fixture_token" \
   "$gitea_api/repos/${fixture_user}/${fixture_repo}/hooks" | \
   jq -er '[.[] | select(.config.url | startswith("http://woodpecker-server:8000"))] | last.id')"
-delivery="$(curl --fail --silent --show-error \
+test -n "$hook_id"
+commit_sha="$(curl --fail --silent --show-error \
   -H "Authorization: token $fixture_token" \
-  "$gitea_api/repos/${fixture_user}/${fixture_repo}/hooks/${hook_id}/deliveries" | \
-  jq -cer '[.[] | select(.response.status >= 200 and .response.status < 300)] | sort_by(.delivered_at) | last')"
-commit_sha="$(printf '%s' "$delivery" | jq -er '.request.body | fromjson | .after')"
+  "$gitea_api/repos/${fixture_user}/${fixture_repo}/branches/main" | jq -er '.commit.id')"
 case "$commit_sha" in ''|*[!0-9a-f]*) exit 1;; esac
 if [ "${#commit_sha}" -ne 40 ]; then exit 1; fi
 run_url="$(curl --fail --silent --show-error \
   -H "Authorization: token $fixture_token" \
   "$gitea_api/repos/${fixture_user}/${fixture_repo}/statuses/$commit_sha" | \
-  jq -er --arg host "$woodpecker_host" '[.[] | select(.state == "success" and (.target_url | startswith($host))) | .target_url] | first')"
+  jq -er --arg host "$woodpecker_host" '[.[] | select(.status == "success" and (.target_url | startswith($host))) | .target_url] | first')"
 
 # The fixture uses the commit SHA as the immutable package version. Download
 # the retained file through the loopback-published package registry.
@@ -56,4 +56,4 @@ artifact_url="${package_api}/${fixture_user}/generic/gascity-compose-fixture/${a
 curl --fail --silent --show-error --user "${fixture_user}:${package_token}" "$artifact_url" | \
   grep -Fx "fixture artifact for ${artifact_version}" >/dev/null
 
-printf '%s\n' "PASS: ${run_url} handled commit ${commit_sha} and retained artifact ${artifact_url}"
+printf '%s\n' "PASS: registered webhook ${hook_id}, ${run_url} handled commit ${commit_sha}, and retained artifact ${artifact_url}"
