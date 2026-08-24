@@ -15,10 +15,10 @@ curl --fail --silent --show-error "http://127.0.0.1:${woodpecker_port}/api/healt
 docker compose --env-file "$env_file" --profile woodpecker ps --status running | grep -q woodpecker-server
 docker compose --env-file "$env_file" --profile woodpecker ps --status running | grep -q woodpecker-agent
 
-# Exercise the exact network selected for pipeline containers. This avoids a
-# false-positive health check where the server is up but a workflow cannot
-# resolve or reach Gitea's Docker-only clone URL.
+# Exercise the network selected for pipeline containers. This validates DNS and
+# unauthenticated Gitea reachability only; repository activation and a real
+# pipeline remain the end-to-end check for OAuth, webhooks, and cloning.
 docker run --rm --network gascity-woodpecker alpine:3.20 \
   wget --spider -q http://gitea:3000/api/healthz
 
-printf '%s\n' 'PASS: Woodpecker is healthy and its workflow network can reach Gitea; activate the private fixture repo in the local UI to run its pipeline'
+printf '%s\n' 'PASS: Woodpecker is healthy and its workflow network can resolve and reach Gitea; activate the private fixture repo in the local UI to verify OAuth, webhooks, and cloning'

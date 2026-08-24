@@ -23,7 +23,6 @@ require 'woodpeckerci/woodpecker-server:v3\.12\.0' "$compose"
 require '127\.0\.0\.1:\$\{WOODPECKER_PORT:-8000\}:8000' "$compose"
 require 'WOODPECKER_GITEA: "true"' "$compose"
 require 'WOODPECKER_GITEA_URL: http://gitea:3000' "$compose"
-require 'WOODPECKER_DEV_GITEA_OAUTH_URL: \$\{WOODPECKER_GITEA_BROWSER_URL:-http://127\.0\.0\.1:\$\{GITEA_HTTP_PORT:-3002\}\}' "$compose"
 require 'GITEA__server__PUBLIC_URL_DETECTION: auto' "$compose"
 require 'woodpecker-agent:' "$compose"
 require 'WOODPECKER_REPO_OWNERS: \$\{WOODPECKER_REPO_OWNERS:-woodpecker-fixture\}' "$compose"
@@ -42,6 +41,20 @@ socket_services="$(awk '
 ' "$compose")"
 if [ "$socket_services" != "woodpecker-agent" ]; then
   printf 'only the Woodpecker agent may receive the Docker socket\n' >&2
+  exit 1
+fi
+
+# Compose interpolation is part of the fixture's connectivity contract. The
+# browser must never be redirected to Docker DNS, while Gitea webhooks must
+# never resolve the loopback address inside the Gitea container.
+rendered="$(mktemp)"
+trap 'rm -f "$rendered"' EXIT
+docker compose --env-file "$root/.env.example" --profile woodpecker config >"$rendered"
+require 'WOODPECKER_EXPERT_FORGE_OAUTH_HOST: http://127\.0\.0\.1:3002' "$rendered"
+require 'WOODPECKER_EXPERT_WEBHOOK_HOST: http://woodpecker-server:8000' "$rendered"
+require 'GITEA__webhook__ALLOWED_HOST_LIST: 127\.0\.0\.1,localhost,woodpecker-server' "$rendered"
+if grep -Eq 'WOODPECKER_DEV_GITEA_OAUTH_URL' "$rendered"; then
+  printf 'Woodpecker v3 must not use the removed DEV_GITEA_OAUTH_URL setting\n' >&2
   exit 1
 fi
 

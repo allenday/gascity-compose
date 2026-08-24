@@ -159,7 +159,10 @@ services:
       GITEA__security__INSTALL_LOCK: "true"
       GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
-      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost
+      # Gitea calls Woodpecker from inside the Compose network. Keep the
+      # allow-list narrow: browsers remain loopback-only and only the CI
+      # server service name is accepted as a webhook destination.
+      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server
       GITEA__log__LEVEL: info
     ports:
       - "127.0.0.1:${GITEA_HTTP_PORT:-3002}:3000"
@@ -192,7 +195,10 @@ services:
       # API calls use Docker DNS; browser OAuth must use the loopback-published
       # Gitea address rather than the internal `gitea` hostname.
       WOODPECKER_GITEA_URL: http://gitea:3000
-      WOODPECKER_DEV_GITEA_OAUTH_URL: ${WOODPECKER_GITEA_BROWSER_URL:-http://127.0.0.1:${GITEA_HTTP_PORT:-3002}}
+      WOODPECKER_EXPERT_FORGE_OAUTH_HOST: ${WOODPECKER_GITEA_BROWSER_URL:-http://127.0.0.1:${GITEA_HTTP_PORT:-3002}}
+      # Gitea emits webhooks from its container, where 127.0.0.1 would point
+      # back to Gitea rather than the loopback-published Woodpecker server.
+      WOODPECKER_EXPERT_WEBHOOK_HOST: http://woodpecker-server:8000
       WOODPECKER_GITEA_CLIENT: ${WOODPECKER_GITEA_CLIENT:-}
       WOODPECKER_GITEA_SECRET: ${WOODPECKER_GITEA_SECRET:-}
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}

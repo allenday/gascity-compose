@@ -398,10 +398,13 @@ given to pipeline steps. Keep the fixture repository private and review any
 change that widens `WOODPECKER_REPO_OWNERS` or adds privileged plugins. The
 workflow network is deliberately separate and uses the `gitea` service name
 for API and clone traffic; the browser OAuth flow instead uses
-`WOODPECKER_GITEA_BROWSER_URL` (loopback Gitea by default). For an external
-deployment, set both `WOODPECKER_HOST` and `WOODPECKER_GITEA_BROWSER_URL` to
-their stable HTTPS browser URLs before bootstrapping the OAuth client, while
-keeping `WOODPECKER_GITEA_URL` on the Docker-only service address.
+`WOODPECKER_GITEA_BROWSER_URL` (loopback Gitea by default). Gitea sends its
+webhooks to Woodpecker's internal service address, which is intentionally
+separate from the browser URL. For an external deployment, set both
+`WOODPECKER_HOST` and `WOODPECKER_GITEA_BROWSER_URL` to their stable HTTPS
+browser URLs before bootstrapping the OAuth client, while keeping
+`WOODPECKER_GITEA_URL` and the internal webhook route on Docker-only service
+addresses.
 
 ## Monitoring notes
 
