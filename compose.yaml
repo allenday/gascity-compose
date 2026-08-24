@@ -170,6 +170,62 @@ services:
       timeout: 5s
       retries: 12
 
+  # CI is deliberately opt-in. The server is localhost-only, accepts only the
+  # fixture account by default, and has no path to City or Gitea bridge tokens.
+  woodpecker-server:
+    profiles: [woodpecker]
+    image: woodpeckerci/woodpecker-server:v3.12.0
+    restart: unless-stopped
+    environment:
+      WOODPECKER_SERVER_ADDR: 0.0.0.0:8000
+      WOODPECKER_GRPC_ADDR: 0.0.0.0:9000
+      WOODPECKER_HOST: ${WOODPECKER_HOST:-http://127.0.0.1:8000}
+      WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-woodpecker-fixture}
+      WOODPECKER_OPEN: "false"
+      WOODPECKER_GITEA: "true"
+      WOODPECKER_GITEA_URL: http://gitea:3000
+      WOODPECKER_GITEA_CLIENT: ${WOODPECKER_GITEA_CLIENT:-}
+      WOODPECKER_GITEA_SECRET: ${WOODPECKER_GITEA_SECRET:-}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
+      WOODPECKER_REPO_OWNERS: ${WOODPECKER_REPO_OWNERS:-woodpecker-fixture}
+      WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: ${WOODPECKER_PIPELINE_TIMEOUT:-15m}
+      WOODPECKER_LOG_LEVEL: warn
+    volumes:
+      - ${WOODPECKER_STATE_DIR:-./state/woodpecker}:/var/lib/woodpecker
+    ports:
+      - "127.0.0.1:${WOODPECKER_PORT:-8000}:8000"
+    depends_on:
+      gitea:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # The Docker backend needs the host daemon to create isolated step
+  # containers. Only this agent sees the socket; pipelines receive neither the
+  # socket nor privileged-plugin permission. Keep the fixture repository
+  # private and do not widen WOODPECKER_REPO_OWNERS without a runner review.
+  woodpecker-agent:
+    profiles: [woodpecker]
+    image: woodpeckerci/woodpecker-agent:v3.12.0
+    restart: unless-stopped
+    environment:
+      WOODPECKER_SERVER: woodpecker-server:9000
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
+      WOODPECKER_MAX_WORKFLOWS: "1"
+      WOODPECKER_HEALTHCHECK_ADDR: :3001
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      woodpecker-server:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   mcp-agent-mail:
     profiles: [mcp]
     build:
