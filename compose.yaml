@@ -148,6 +148,9 @@ services:
       GITEA__database__DB_TYPE: sqlite3
       GITEA__server__DOMAIN: 127.0.0.1
       GITEA__server__ROOT_URL: http://127.0.0.1:${GITEA_HTTP_PORT:-3002}/
+      # Let API callers on the CI network receive `gitea` clone URLs while
+      # keeping direct browser use anchored to its loopback Host header.
+      GITEA__server__PUBLIC_URL_DETECTION: auto
       GITEA__server__HTTP_PORT: "3000"
       GITEA__server__START_SSH_SERVER: "true"
       GITEA__server__SSH_DOMAIN: 127.0.0.1
@@ -164,6 +167,9 @@ services:
     volumes:
       - ${GITEA_STATE_DIR:-./state/gitea}/data:/var/lib/gitea
       - ${GITEA_STATE_DIR:-./state/gitea}/config:/etc/gitea
+    networks:
+      - default
+      - woodpecker
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/healthz"]
       interval: 10s
@@ -183,7 +189,10 @@ services:
       WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-woodpecker-fixture}
       WOODPECKER_OPEN: "false"
       WOODPECKER_GITEA: "true"
+      # API calls use Docker DNS; browser OAuth must use the loopback-published
+      # Gitea address rather than the internal `gitea` hostname.
       WOODPECKER_GITEA_URL: http://gitea:3000
+      WOODPECKER_DEV_GITEA_OAUTH_URL: ${WOODPECKER_GITEA_BROWSER_URL:-http://127.0.0.1:${GITEA_HTTP_PORT:-3002}}
       WOODPECKER_GITEA_CLIENT: ${WOODPECKER_GITEA_CLIENT:-}
       WOODPECKER_GITEA_SECRET: ${WOODPECKER_GITEA_SECRET:-}
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
@@ -194,6 +203,8 @@ services:
       - ${WOODPECKER_STATE_DIR:-./state/woodpecker}:/var/lib/woodpecker
     ports:
       - "127.0.0.1:${WOODPECKER_PORT:-8000}:8000"
+    networks:
+      - woodpecker
     depends_on:
       gitea:
         condition: service_healthy
@@ -216,6 +227,9 @@ services:
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
       WOODPECKER_MAX_WORKFLOWS: "1"
       WOODPECKER_HEALTHCHECK_ADDR: :3001
+      # Workflow containers must use the same isolated network as Gitea so
+      # Gitea's API-reported `http://gitea:3000` clone URL is reachable.
+      WOODPECKER_BACKEND_DOCKER_NETWORK: gascity-woodpecker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -225,6 +239,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      - woodpecker
 
   mcp-agent-mail:
     profiles: [mcp]
@@ -440,3 +456,7 @@ services:
       - /sys:/host/sys:ro
       - /:/host:ro
     restart: unless-stopped
+
+networks:
+  woodpecker:
+    name: gascity-woodpecker

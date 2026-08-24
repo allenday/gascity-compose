@@ -23,8 +23,13 @@ require 'woodpeckerci/woodpecker-server:v3\.12\.0' "$compose"
 require '127\.0\.0\.1:\$\{WOODPECKER_PORT:-8000\}:8000' "$compose"
 require 'WOODPECKER_GITEA: "true"' "$compose"
 require 'WOODPECKER_GITEA_URL: http://gitea:3000' "$compose"
+require 'WOODPECKER_DEV_GITEA_OAUTH_URL: \$\{WOODPECKER_GITEA_BROWSER_URL:-http://127\.0\.0\.1:\$\{GITEA_HTTP_PORT:-3002\}\}' "$compose"
+require 'GITEA__server__PUBLIC_URL_DETECTION: auto' "$compose"
 require 'woodpecker-agent:' "$compose"
 require 'WOODPECKER_REPO_OWNERS: \$\{WOODPECKER_REPO_OWNERS:-woodpecker-fixture\}' "$compose"
+require 'WOODPECKER_BACKEND_DOCKER_NETWORK: gascity-woodpecker' "$compose"
+require '^  woodpecker:$' "$compose"
+require 'name: gascity-woodpecker' "$compose"
 require 'cap_drop:' "$compose"
 require 'no-new-privileges:true' "$compose"
 if grep -Eq 'privileged: true' "$compose"; then
@@ -57,5 +62,8 @@ require 'WOODPECKER_AGENT_SECRET' "$preflight"
 require 'WOODPECKER_GITEA_CLIENT' "$preflight"
 require 'WOODPECKER_GITEA_SECRET' "$preflight"
 require 'woodpecker-preflight' "$root/Makefile"
+require 'gascity-woodpecker' "$root/scripts/woodpecker-smoke.sh"
+require 'api/healthz' "$root/scripts/woodpecker-smoke.sh"
+require 'WOODPECKER_GITEA_BROWSER_URL=' "$root/.env.example"
 
-printf '%s\n' 'PASS: Woodpecker fixture is profile-gated and least-privileged'
+printf '%s\n' 'PASS: Woodpecker fixture structural safeguards are configured'

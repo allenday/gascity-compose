@@ -14,4 +14,11 @@ woodpecker_port="$(value_for WOODPECKER_PORT 8000)"
 curl --fail --silent --show-error "http://127.0.0.1:${woodpecker_port}/api/health" >/dev/null
 docker compose --env-file "$env_file" --profile woodpecker ps --status running | grep -q woodpecker-server
 docker compose --env-file "$env_file" --profile woodpecker ps --status running | grep -q woodpecker-agent
-printf '%s\n' 'PASS: Woodpecker server and agent are healthy; activate the private fixture repo in the local UI to run its pipeline'
+
+# Exercise the exact network selected for pipeline containers. This avoids a
+# false-positive health check where the server is up but a workflow cannot
+# resolve or reach Gitea's Docker-only clone URL.
+docker run --rm --network gascity-woodpecker alpine:3.20 \
+  wget --spider -q http://gitea:3000/api/healthz
+
+printf '%s\n' 'PASS: Woodpecker is healthy and its workflow network can reach Gitea; activate the private fixture repo in the local UI to run its pipeline'

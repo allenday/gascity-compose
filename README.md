@@ -395,10 +395,13 @@ The server binds only to loopback, accepts only the fixture owner by default,
 and runs one workflow at a time. The Docker agent necessarily owns the Docker
 socket to create step containers; no socket or privileged-plugin permission is
 given to pipeline steps. Keep the fixture repository private and review any
-change that widens `WOODPECKER_REPO_OWNERS` or adds privileged plugins. For an
-external deployment, set `WOODPECKER_HOST` to a stable HTTPS URL reachable by
-the browser and configure Gitea's `ROOT_URL` to that same externally reachable
-Gitea address before bootstrapping its OAuth client.
+change that widens `WOODPECKER_REPO_OWNERS` or adds privileged plugins. The
+workflow network is deliberately separate and uses the `gitea` service name
+for API and clone traffic; the browser OAuth flow instead uses
+`WOODPECKER_GITEA_BROWSER_URL` (loopback Gitea by default). For an external
+deployment, set both `WOODPECKER_HOST` and `WOODPECKER_GITEA_BROWSER_URL` to
+their stable HTTPS browser URLs before bootstrapping the OAuth client, while
+keeping `WOODPECKER_GITEA_URL` on the Docker-only service address.
 
 ## Monitoring notes
 
