@@ -8,6 +8,13 @@ mail="$(mktemp)"
 city="$(mktemp)"
 trap 'rm -f "$rendered" "$bridge" "$mail" "$city"' EXIT
 
+# The bridge profile is operationally self-contained: callers must not need to
+# know or enable Agent Mail's implementation profile separately.
+(
+  cd "$root"
+  docker compose --env-file .env.example --profile gitea-mail-bridge config -q
+)
+
 docker compose --project-directory "$root" --env-file "$root/.env.example" \
   --profile city --profile mcp --profile gitea-mail-bridge config >"$rendered"
 
@@ -73,7 +80,7 @@ fi
 # Gitea may deliver only to the internal bridge hostname, and the source image
 # pin must be the immutable Task 4 merge.
 require 'GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server,gitea-mail-bridge' "$rendered"
-require 'GASCITY_GITEA_REF: 1b49cbab108798645519c7bab1c055fe008ddd83' "$rendered"
+require 'GASCITY_GITEA_REF: e9ef640690b658971ec3089198ad2f039997ec91' "$rendered"
 require 'git status --porcelain --untracked-files=all' "$rendered"
 
 # Mayor gets Agent Mail through its role-specific Runpod Codex profile. The

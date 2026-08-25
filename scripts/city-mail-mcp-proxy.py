@@ -24,6 +24,14 @@ ALLOWED_TOOLS = frozenset(
         "reply_message",
     }
 )
+ALLOWED_METHODS = frozenset(
+    {
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "tools/call",
+    }
+)
 AGENT_TOOLS = frozenset(
     {"fetch_inbox", "fetch_topic", "mark_message_read", "acknowledge_message"}
 )
@@ -46,7 +54,10 @@ def rewrite_request(request: Any, binding: Binding) -> Any:
     if not isinstance(request, dict):
         raise ValueError("JSON-RPC request must be an object or batch")
     rewritten = copy.deepcopy(request)
-    if rewritten.get("method") != "tools/call":
+    method = rewritten.get("method")
+    if method not in ALLOWED_METHODS:
+        raise ValueError(f"MCP method {method!r} is not available to Mayor")
+    if method != "tools/call":
         return rewritten
     params = rewritten.get("params")
     if not isinstance(params, dict):

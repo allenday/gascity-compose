@@ -262,7 +262,7 @@ services:
       - woodpecker
 
   mcp-agent-mail:
-    profiles: [mcp]
+    profiles: [mcp, gitea-mail-bridge]
     build:
       context: .
       dockerfile: Dockerfile.mcp-agent-mail
@@ -296,7 +296,7 @@ services:
     build:
       context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
       args:
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-1b49cbab108798645519c7bab1c055fe008ddd83}
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-e9ef640690b658971ec3089198ad2f039997ec91}
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
         ARG GASCITY_GITEA_REF
@@ -372,7 +372,7 @@ services:
     build:
       context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
       args:
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-1b49cbab108798645519c7bab1c055fe008ddd83}
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-e9ef640690b658971ec3089198ad2f039997ec91}
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
         ARG GASCITY_GITEA_REF

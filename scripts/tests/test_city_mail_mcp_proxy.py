@@ -81,6 +81,55 @@ class RewriteRequestTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not available"):
             self.proxy.rewrite_request(register, self.binding)
 
+    def test_rejects_every_non_protocol_and_non_tool_call_method(self):
+        for request_id, method in enumerate(
+            (
+                "resources/list",
+                "resources/read",
+                "prompts/list",
+                "prompts/get",
+                "completion/complete",
+                "sampling/createMessage",
+                "logging/setLevel",
+                "roots/list",
+                "not/a-real-method",
+            ),
+            start=20,
+        ):
+            with self.subTest(method=method):
+                request = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": method,
+                    "params": {},
+                }
+                with self.assertRaisesRegex(ValueError, "not available to Mayor"):
+                    self.proxy.rewrite_request(request, self.binding)
+
+    def test_allows_only_required_mcp_session_and_tool_discovery_methods(self):
+        requests = (
+            {
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"},
+                },
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            },
+            {"jsonrpc": "2.0", "id": 31, "method": "tools/list", "params": {}},
+        )
+
+        for request in requests:
+            with self.subTest(method=request["method"]):
+                self.assertEqual(request, self.proxy.rewrite_request(request, self.binding))
+
     def test_tools_list_hides_every_non_mayor_operation(self):
         response = {
             "jsonrpc": "2.0",
