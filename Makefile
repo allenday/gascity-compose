@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -33,6 +33,15 @@ gitea-bridge-up: gitea-bridge-bootstrap
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_RUN_ID" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	$(COMPOSE) --profile city --profile gitea-bridge up -d --build gitea-bridge
 
+gitea-mail-bridge-bootstrap:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-bridge-bootstrap.sh
+
+gitea-mail-bridge-up: gitea-mail-bridge-bootstrap
+	$(COMPOSE) --profile mcp --profile gitea-mcp --profile gitea-mail-bridge up -d --build --wait --wait-timeout 120 gitea-mcp-mayor gitea-mail-bridge
+
+gitea-mail-bridge-smoke:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-bridge-smoke.sh
+
 woodpecker-fixture-bootstrap:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-fixture-bootstrap.sh
 
@@ -50,3 +59,5 @@ woodpecker-acceptance:
 
 test:
 	sh ./scripts/tests/test_woodpecker_fixture.sh
+	sh ./scripts/tests/test_gitea_mail_bridge.sh
+	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py

@@ -62,6 +62,13 @@ services:
       # Pass it from the host environment when creating/recreating this service;
       # it is deliberately not committed to the compose environment file.
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+      # Non-secret signal coordinates let the in-container watcher wake Mayor.
+      # Mail credentials are read only by the Mayor provider wrapper from the
+      # mounted role file; they never enter the supervisor's ambient env.
+      MCP_AGENT_MAIL_PROJECT_KEY: ${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}
+      MCP_AGENT_MAIL_MAYOR_IDENTITY: ${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
+      CITY_MAIL_WAKE_ENABLED: ${CITY_MAIL_WAKE_ENABLED:-true}
+      CITY_MAIL_SIGNAL_FILE: /var/lib/mcp-mail-signals/projects/${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}/agents/${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}.signal
       # Non-secret profile settings rendered into ephemeral CODEX_HOME.
       TAILNET_OLLAMA_BASE_URL: ${TAILNET_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       RUNPOD_OPENAI_BASE_URL: ${RUNPOD_OPENAI_BASE_URL:-https://api.runpod.ai/v2/not-configured/openai/v1}
@@ -80,6 +87,8 @@ services:
       - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
       - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in .env to the host Codex auth file}:/run/secrets/codex-auth.json:ro
       - ./codex:/run/secrets/codex-config:ro
+      - ./state/city-mail-secrets:/run/secrets/city-mail:ro
+      - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
@@ -161,9 +170,9 @@ services:
       GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
       # OAuth browser redirects use loopback; the webhook allow-list below is
-      # separate and permits only the Docker-local Woodpecker server.
+      # separate and permits only the Docker-local webhook consumers.
       GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server
-      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server
+      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server,gitea-mail-bridge
       GITEA__log__LEVEL: info
     ports:
       - "127.0.0.1:${GITEA_HTTP_PORT:-3002}:3000"
@@ -258,6 +267,19 @@ services:
       context: .
       dockerfile: Dockerfile.mcp-agent-mail
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -n "$$HTTP_BEARER_TOKEN"
+        test "$$HTTP_BEARER_TOKEN" != bootstrap-required
+        exec python3 -m mcp_agent_mail.http --host 0.0.0.0 --port 8765
+    environment:
+      HTTP_PATH: /mcp/
+      HTTP_BEARER_TOKEN: ${MCP_AGENT_MAIL_BEARER_TOKEN:-bootstrap-required}
+      HTTP_RBAC_DEFAULT_ROLE: writer
+      HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED: "false"
+      NOTIFICATIONS_ENABLED: "true"
+      NOTIFICATIONS_SIGNALS_DIR: /var/lib/mcp-mail/signals
     volumes:
       - ./state/mcp-agent-mail:/var/lib/mcp-mail
     healthcheck:
@@ -265,6 +287,63 @@ services:
       interval: 15s
       timeout: 5s
       retries: 8
+
+  # Tracker-to-City intake is a separate private process from the status-only
+  # gitea-bridge. It has no City API, issue-write, or run-mutation credential.
+  gitea-mail-bridge:
+    profiles: [gitea-mail-bridge]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
+      args:
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-1b49cbab108798645519c7bab1c055fe008ddd83}
+      dockerfile_inline: |
+        FROM golang:1.24-alpine AS build
+        ARG GASCITY_GITEA_REF
+        RUN apk add --no-cache git
+        WORKDIR /src
+        COPY go.mod ./
+        RUN go mod download
+        COPY . .
+        RUN test -z "$$(git status --porcelain --untracked-files=all)" \
+            && test "$$(git rev-parse HEAD)" = "$${GASCITY_GITEA_REF}" \
+            && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/gitea-mail-bridge ./cmd/gitea-mail-bridge
+        FROM gcr.io/distroless/static-debian12:nonroot
+        COPY --from=build /out/gitea-mail-bridge /gitea-mail-bridge
+        USER nonroot:nonroot
+        ENTRYPOINT ["/gitea-mail-bridge"]
+    environment:
+      GITEA_MAIL_BRIDGE_ADDR: :8080
+      GITEA_URL: http://gitea:3000
+      GITEA_TOKEN: ${GITEA_MAIL_BRIDGE_TOKEN:-}
+      GITEA_WEBHOOK_SECRET: ${GITEA_MAIL_BRIDGE_WEBHOOK_SECRET:-}
+      INTAKE_LEDGER_PATH: /var/lib/gitea-mail-bridge/ledger.json
+      INTAKE_ACCOUNT: ${INTAKE_ACCOUNT:-gascity-mcp-mayor}
+      INTAKE_MAYOR_ACTOR_ID: ${INTAKE_MAYOR_ACTOR_ID:-}
+      INTAKE_REPOSITORY_SCOPES: ${INTAKE_REPOSITORY_SCOPES:-}
+      INTAKE_CITY_IDENTITIES: ${INTAKE_CITY_IDENTITIES:-}
+      INTAKE_ELIGIBLE_COLLABORATORS: ${INTAKE_ELIGIBLE_COLLABORATORS:-}
+      INTAKE_APPROVAL_LABEL: ${INTAKE_APPROVAL_LABEL:-gc:intake-approved}
+      INTAKE_CLAIMANT: ${INTAKE_CLAIMANT:-gitea-mail-bridge}
+      INTAKE_OUTBOX_LEASE_SECONDS: ${INTAKE_OUTBOX_LEASE_SECONDS:-30}
+      INTAKE_RECONCILE_SECONDS: ${INTAKE_RECONCILE_SECONDS:-30}
+      INTAKE_AUTHORIZATION_TTL_SECONDS: ${INTAKE_AUTHORIZATION_TTL_SECONDS:-3600}
+      INTAKE_MAIL_URL: http://mcp-agent-mail:8765/mcp
+      INTAKE_MAIL_HTTP_BEARER_TOKEN: ${MCP_AGENT_MAIL_BEARER_TOKEN:-}
+      INTAKE_MAIL_SENDER_TOKEN: ${MCP_AGENT_MAIL_BRIDGE_REGISTRATION_TOKEN:-}
+      INTAKE_MAIL_REGISTRATION_TOKEN: ${MCP_AGENT_MAIL_BRIDGE_REGISTRATION_TOKEN:-}
+      INTAKE_MAIL_PROJECT_KEY: ${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}
+      INTAKE_MAIL_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
+      INTAKE_MAIL_MAYOR_IDENTITY: ${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
+      INTAKE_MAIL_LAUNCHER_IDENTITY: ${INTAKE_MAIL_LAUNCHER_IDENTITY:-gas-city-launcher}
+    volumes:
+      - ./state/gitea-mail-bridge:/var/lib/gitea-mail-bridge
+    depends_on:
+      gitea:
+        condition: service_healthy
+      mcp-agent-mail:
+        condition: service_healthy
+    restart: unless-stopped
 
   gascity-mcp:
     profiles: [mcp]
@@ -291,9 +370,9 @@ services:
   gitea-bridge:
     profiles: [gitea-bridge]
     build:
-      context: ${GITEA_BRIDGE_DIR:-../gascity-gitea}
+      context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
       args:
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-f3330b008e650aae56aa26ebec4cea825174a34c}
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-1b49cbab108798645519c7bab1c055fe008ddd83}
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
         ARG GASCITY_GITEA_REF

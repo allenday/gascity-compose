@@ -1,4 +1,6 @@
 # Generated into ephemeral CODEX_HOME by city-entrypoint.
+# Agent Mail is intentionally absent here. It is configured in the Mayor-only
+# runpod profile so other Codex roles do not receive the authenticated binding.
 [model_providers.tailnet]
 name = "Tailnet Ollama"
 base_url = "$TAILNET_OLLAMA_BASE_URL"

@@ -55,4 +55,8 @@ fi
 # start; gc import install is idempotent when the lock is already cached.
 gc --city "$CITY_PATH" import install
 
+if [ "${CITY_MAIL_WAKE_ENABLED:-true}" = "true" ]; then
+  /usr/local/bin/city-mail-wake &
+fi
+
 exec gc supervisor run

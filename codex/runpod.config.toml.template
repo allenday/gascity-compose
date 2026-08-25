@@ -1,2 +1,13 @@
 model = "$GEMMA_MODEL"
 model_provider = "runpod"
+
+# `runpod` is assigned only to gastown.mayor by city-cost-safe.toml. Keeping
+# Agent Mail here prevents observer/worker Codex sessions from receiving the
+# authenticated mail endpoint.
+[mcp_servers.agent_mail]
+url = "http://127.0.0.1:8767/mcp"
+
+# Mayor's public issue-thread identity is the already restricted Gitea MCP
+# service. Its PAT stays in that service and never enters the City container.
+[mcp_servers.gitea]
+url = "http://gitea-mcp-mayor:8080/mcp"

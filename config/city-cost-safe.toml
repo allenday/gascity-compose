@@ -12,8 +12,9 @@ args_append = ["--profile", "tailnet"]
 options_schema_merge = "by_key"
 options_schema = [{ key = "model", omit = true }]
 
-[providers.codex-runpod]
+[providers.codex-mayor-runpod]
 base = "builtin:codex"
+command = "/usr/local/bin/codex-mayor"
 ready_delay_ms = 0
 args_append = ["--profile", "runpod"]
 options_schema_merge = "by_key"
@@ -33,7 +34,7 @@ provider = "codex-tailnet"
 
 [[patches.agent]]
 name = "gastown.mayor"
-provider = "codex-runpod"
+provider = "codex-mayor-runpod"
 
 [[patches.agent]]
 rig = "*"

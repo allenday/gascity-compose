@@ -1,0 +1,53 @@
+#!/usr/bin/env sh
+set -eu
+
+secret_file="${CITY_MAIL_MAYOR_SECRET_FILE:-/run/secrets/city-mail/mayor.env}"
+if [ ! -r "$secret_file" ]; then
+  printf '%s\n' "ERROR: Mayor Mail credentials are unavailable; run gitea-mail-bridge-bootstrap" >&2
+  exit 1
+fi
+
+proxy_pid=
+codex_pid=
+stop_children() {
+  if [ -n "$codex_pid" ]; then
+    kill -TERM "$codex_pid" 2>/dev/null || true
+  fi
+  if [ -n "$proxy_pid" ]; then
+    kill -TERM "$proxy_pid" 2>/dev/null || true
+  fi
+}
+trap stop_children HUP INT TERM
+
+CITY_MAIL_MAYOR_SECRET_FILE="$secret_file" /usr/local/bin/city-mail-mcp-proxy &
+proxy_pid=$!
+attempts=0
+while ! python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8767/health/liveness', timeout=1)" >/dev/null 2>&1; do
+  if ! kill -0 "$proxy_pid" 2>/dev/null; then
+    wait "$proxy_pid" || true
+    printf '%s\n' 'ERROR: Mayor Mail MCP proxy failed to start' >&2
+    exit 1
+  fi
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge 50 ]; then
+    printf '%s\n' 'ERROR: Mayor Mail MCP proxy did not become ready' >&2
+    stop_children
+    exit 1
+  fi
+  sleep 0.1
+done
+
+/usr/local/bin/codex "$@" &
+codex_pid=$!
+if wait "$codex_pid"; then
+  codex_status=0
+else
+  codex_status=$?
+fi
+codex_pid=
+stop_children
+wait "$proxy_pid" 2>/dev/null || true
+proxy_pid=
+trap - HUP INT TERM
+
+exit "$codex_status"
