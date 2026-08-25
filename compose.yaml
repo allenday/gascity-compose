@@ -147,9 +147,10 @@ services:
       USER_GID: "1000"
       GITEA__database__DB_TYPE: sqlite3
       GITEA__server__DOMAIN: 127.0.0.1
-      GITEA__server__ROOT_URL: http://127.0.0.1:${GITEA_HTTP_PORT:-3002}/
-      # Let API callers on the CI network receive `gitea` clone URLs while
-      # keeping direct browser use anchored to its loopback Host header.
+      # Webhook payloads persist this URL as Woodpecker's clone address, so it
+      # must resolve from workflow containers on the isolated CI network.
+      # Browser requests retain their Nginx proxy-facing host via detection.
+      GITEA__server__ROOT_URL: http://gitea:3000/
       GITEA__server__PUBLIC_URL_DETECTION: auto
       GITEA__server__HTTP_PORT: "3000"
       GITEA__server__START_SSH_SERVER: "true"
@@ -159,9 +160,10 @@ services:
       GITEA__security__INSTALL_LOCK: "true"
       GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
-      # Gitea applies this security allow-list to OAuth and webhooks. Permit
-      # only its loopback browser route and the exact Docker webhook hostname.
+      # OAuth browser redirects use loopback; the webhook allow-list below is
+      # separate and permits only the Docker-local Woodpecker server.
       GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server
+      GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server
       GITEA__log__LEVEL: info
     ports:
       - "127.0.0.1:${GITEA_HTTP_PORT:-3002}:3000"

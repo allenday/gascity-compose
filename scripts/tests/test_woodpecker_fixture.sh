@@ -23,7 +23,9 @@ require 'woodpeckerci/woodpecker-server:v3\.12\.0' "$compose"
 require '127\.0\.0\.1:\$\{WOODPECKER_PORT:-8000\}:8000' "$compose"
 require 'WOODPECKER_GITEA: "true"' "$compose"
 require 'WOODPECKER_GITEA_URL: http://gitea:3000' "$compose"
+require 'GITEA__server__ROOT_URL: http://gitea:3000/' "$compose"
 require 'GITEA__server__PUBLIC_URL_DETECTION: auto' "$compose"
+require 'GITEA__webhook__ALLOWED_HOST_LIST: 127\.0\.0\.1,localhost,woodpecker-server' "$compose"
 require 'woodpecker-agent:' "$compose"
 require 'WOODPECKER_REPO_OWNERS: \$\{WOODPECKER_REPO_OWNERS:-woodpecker-fixture\}' "$compose"
 require 'WOODPECKER_BACKEND_DOCKER_NETWORK: gascity-woodpecker' "$compose"
@@ -78,14 +80,20 @@ require 'fixture_pipeline()' "$fixture"
 require 'PIPELINE_EOF' "$fixture"
 require '\-X PUT' "$fixture"
 require 'existing_sha' "$fixture"
-require 'redirect_uris:\[\$redirect\]\}' "$fixture"
+require 'redirect_uris:\[\$redirect\]' "$fixture"
+require 'confidential_client:true' "$fixture"
 pipeline_yaml="$(awk '
   /^fixture_pipeline\(\)/ { capture = 1; next }
   capture && /^when:/ { body = 1 }
   capture && /^PIPELINE_EOF$/ { exit }
   body { print }
 ' "$fixture")"
-if ! printf '%s\n' "$pipeline_yaml" | ruby -e 'require "yaml"; YAML.safe_load(STDIN.read)'; then
+if command -v ruby >/dev/null 2>&1; then
+  pipeline_parser='ruby -e '\''require "yaml"; YAML.safe_load(STDIN.read)'\'''
+else
+  pipeline_parser='python3 -c '\''import sys, yaml; yaml.safe_load(sys.stdin.read())'\'''
+fi
+if ! printf '%s\n' "$pipeline_yaml" | sh -c "$pipeline_parser"; then
   printf '%s\n' 'fixture pipeline must be valid YAML' >&2
   exit 1
 fi
@@ -112,5 +120,7 @@ if grep -Eq 'hooks/.*/deliveries|\.state == "success"' "$root/scripts/woodpecker
 fi
 require 'WOODPECKER_GITEA_BROWSER_URL=' "$root/.env.example"
 require 'GITEA_WOODPECKER_PACKAGE_TOKEN=' "$root/.env.example"
+require 'href="/gitea".*reverse proxied' "$root/nginx/html/index.html"
+require 'location = /gitea' "$root/nginx/nginx.conf"
 
 printf '%s\n' 'PASS: Woodpecker fixture structural safeguards are configured'
