@@ -293,7 +293,7 @@ services:
     build:
       context: ${GITEA_BRIDGE_DIR:-../gascity-gitea}
       args:
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-f3330b008e650aae56aa26ebec4cea825174a34c}
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:-1b49cbab108798645519c7bab1c055fe008ddd83}
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
         ARG GASCITY_GITEA_REF
