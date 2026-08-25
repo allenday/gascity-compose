@@ -81,7 +81,7 @@ if [ -z "$oauth_client" ] || [ -z "$oauth_secret" ]; then
     -H "Authorization: token $fixture_token" \
     -H 'Content-Type: application/json' \
     -X POST "$gitea_api/user/applications/oauth2" \
-    --data "$(jq -nc --arg name gascity-compose-woodpecker --arg redirect "${woodpecker_host}/authorize" '{name:$name,redirect_uris:[$redirect}]')")"
+    --data "$(jq -nc --arg name gascity-compose-woodpecker --arg redirect "${woodpecker_host}/authorize" '{name:$name,redirect_uris:[$redirect]}')")"
   oauth_client="$(printf '%s' "$oauth" | jq -er '.client_id')"
   oauth_secret="$(printf '%s' "$oauth" | jq -er '.client_secret')"
   upsert WOODPECKER_GITEA_CLIENT "$oauth_client"

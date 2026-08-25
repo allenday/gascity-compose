@@ -56,6 +56,8 @@ require 'GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server' "$rende
 require 'WOODPECKER_OPEN: "false"' "$rendered"
 require 'WOODPECKER_ADMIN: woodpecker-fixture' "$rendered"
 require 'WOODPECKER_ENVIRONMENT: GITEA_FIXTURE_PACKAGE_TOKEN:' "$rendered"
+require 'WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: "15"' "$rendered"
+require '"/bin/woodpecker-server", "ping"' "$compose"
 if grep -Eq 'WOODPECKER_DEV_GITEA_OAUTH_URL' "$rendered"; then
   printf 'Woodpecker v3 must not use the removed DEV_GITEA_OAUTH_URL setting\n' >&2
   exit 1
@@ -76,6 +78,7 @@ require 'fixture_pipeline()' "$fixture"
 require 'PIPELINE_EOF' "$fixture"
 require '\-X PUT' "$fixture"
 require 'existing_sha' "$fixture"
+require 'redirect_uris:\[\$redirect\]\}' "$fixture"
 pipeline_yaml="$(awk '
   /^fixture_pipeline\(\)/ { capture = 1; next }
   capture && /^when:/ { body = 1 }
