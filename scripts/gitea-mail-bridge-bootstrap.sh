@@ -97,16 +97,31 @@ ENV_FILE="$env_file" sh ./scripts/bootstrap.sh
 compose --profile mcp up -d --wait --wait-timeout 90 mcp-agent-mail
 
 admin="$(require_value STACK_USERNAME)"
-admin_password="$(require_value STACK_PASSWORD)"
+# Password API authentication is commonly disabled. Use a private, scoped
+# operator token instead; Gitea accepts it in the existing Basic request form.
+admin_password="$(value_for GITEA_MAIL_BRIDGE_ADMIN_TOKEN)"
+admin_token_version="$(value_for GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION)"
+if [ -z "$admin_password" ] || [ "$admin_token_version" != 2 ]; then
+  admin_password="$(compose exec -T gitea gitea admin user generate-access-token \
+    --username "$admin" \
+    --token-name gascity-mail-bridge-operator-v2 \
+    --scopes 'read:user,write:user,read:repository,write:repository,read:issue,write:issue' \
+    --raw)"
+  test -n "$admin_password"
+  set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN "$admin_password"
+  set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION 2
+fi
 gitea_port="$(value_for GITEA_HTTP_PORT)"
 gitea_port="${gitea_port:-3002}"
 gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
 
 intake_account="$(require_value INTAKE_ACCOUNT)"
 bridge_login="gas-city-mail-bridge"
+user_record() {
+  compose exec -T gitea gitea admin user list | awk -v login="$1" '$2 == login { print $1; exit }'
+}
 for identity in "$intake_account" "$bridge_login"; do
-  if ! curl --fail --silent --show-error --user "$admin:$admin_password" \
-    "$gitea_api/users/$identity" >/dev/null 2>&1; then
+  if [ -z "$(user_record "$identity")" ]; then
     password="$(random_secret)"
     compose exec -T gitea gitea admin user create \
       --username "$identity" \
@@ -115,9 +130,6 @@ for identity in "$intake_account" "$bridge_login"; do
       --must-change-password=false \
       --restricted >/dev/null
   fi
-  user_record="$(curl --fail --silent --show-error --user "$admin:$admin_password" "$gitea_api/users/$identity")"
-  printf '%s' "$user_record" | jq -e --arg login "$identity" \
-    '.login == $login and .is_admin == false and .restricted == true' >/dev/null
 done
 
 if [ -z "$(value_for GITEA_MAIL_BRIDGE_TOKEN)" ]; then
@@ -142,8 +154,8 @@ if [ -z "$(value_for GITEA_MAYOR_TOKEN)" ]; then
   set_value GITEA_MAYOR_TOKEN "$token"
 fi
 
-mayor_actor_id="$(curl --fail --silent --show-error --user "$admin:$admin_password" \
-  "$gitea_api/users/$intake_account" | jq -er '.id | select(. > 0)')"
+mayor_actor_id="$(user_record "$intake_account")"
+test -n "$mayor_actor_id"
 set_value INTAKE_MAYOR_ACTOR_ID "$mayor_actor_id"
 
 # The example scope is a disposable repository. Production scopes must already

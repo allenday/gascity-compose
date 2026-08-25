@@ -44,6 +44,7 @@ compose exec -T gitea gitea admin user create \
   --must-change-password=false >/dev/null 2>&1 || true
 compose exec -T gitea gitea admin user change-password \
   --username "$username" \
-  --password "$password" >/dev/null
+  --password "$password" \
+  --must-change-password=false >/dev/null
 
 printf '%s\n' 'PASS: state ownership and Gitea admin are bootstrapped'

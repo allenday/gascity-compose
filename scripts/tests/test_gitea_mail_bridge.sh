@@ -31,7 +31,7 @@ service_block() {
 require() {
   pattern="$1"
   file="$2"
-  if ! grep -Eq "$pattern" "$file"; then
+  if ! grep -Eq -- "$pattern" "$file"; then
     printf 'missing %s in %s\n' "$pattern" "$file" >&2
     exit 1
   fi
@@ -110,6 +110,11 @@ for script in gitea-mail-bridge-bootstrap.sh gitea-mail-bridge-smoke.sh city-mai
 done
 python3 -c 'import pathlib,sys; path=pathlib.Path(sys.argv[1]); compile(path.read_text(), str(path), "exec")' "$root/scripts/city-mail-mcp-proxy.py"
 require 'MCP_AGENT_MAIL_PROJECT_PATH' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-smoke.sh"
+require 'gitea admin user list' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require '--must-change-password=false' "$root/scripts/bootstrap.sh"
 require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'city-mail-wake' "$root/docker/city-entrypoint.sh"
 require 'city-mail-mcp-proxy' "$root/scripts/codex-mayor"

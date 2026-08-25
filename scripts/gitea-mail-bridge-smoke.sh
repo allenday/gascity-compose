@@ -130,7 +130,7 @@ wait_for_authorization() {
 }
 
 admin="$(require_value STACK_USERNAME)"
-admin_password="$(require_value STACK_PASSWORD)"
+admin_password="$(require_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN)"
 gitea_port="$(value_for GITEA_HTTP_PORT)"
 gitea_port="${gitea_port:-3002}"
 gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
