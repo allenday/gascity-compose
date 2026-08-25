@@ -167,7 +167,7 @@ wait_for_count "$mayor_mail" "$mayor_mail_token" "$thread_id" 1
 # Re-submit the authenticated issue hint with a different delivery receipt.
 # The logical tracker row is unchanged, so no second mail may appear.
 replay_body="$(jq -nc --arg created "$created_at" --arg updated "$updated_at" \
-  --arg url "$issue_url" --arg repo "$repository" --arg login "$admin" \
+  --arg url "$instance/$repository/issues/$issue_number" --arg repo "$repository" --arg login "$admin" \
   --argjson number "$issue_number" --argjson actor "$admin_id" \
   '{action:"opened",issue:{number:$number,html_url:$url,created_at:$created,updated_at:$updated},repository:{full_name:$repo,html_url:"http://gitea:3000/"+$repo},sender:{id:$actor,login:$login}}')"
 signature="$(printf '%s' "$replay_body" | openssl dgst -sha256 -hmac "$(require_value GITEA_MAIL_BRIDGE_WEBHOOK_SECRET)" | awk '{print $NF}')"
