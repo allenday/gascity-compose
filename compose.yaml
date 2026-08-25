@@ -171,7 +171,7 @@ services:
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
       # OAuth browser redirects use loopback; the webhook allow-list below is
       # separate and permits only the Docker-local webhook consumers.
-      GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server
+      GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server,gitea-mail-bridge
       GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server,gitea-mail-bridge
       GITEA__log__LEVEL: info
     ports:
