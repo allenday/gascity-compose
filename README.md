@@ -358,12 +358,60 @@ for least-privilege tokens and repository membership. These endpoints bind only 
 host-process agents are separated by configuration rather than a hard OS boundary.
 In particular, Gitea's `write:issue` token scope also covers some destructive raw-API issue
 operations; agents only see the selected MCP tools, but a stolen PAT could otherwise call Gitea
-directly. The pinned library now also offers a `woodpecker.AcceptanceVerifier` for a future
+directly. The optional Woodpecker integration is an evidence producer: its immutable run and
+artifact URLs can later be reflected by the bridge into the managed status comment; it does not
+participate in gate resolution.
+
+The pinned `gascity-gitea` library also offers a `woodpecker.AcceptanceVerifier` for a future
 resolution controller. It uses a dedicated Woodpecker PAT and one explicitly pinned pipeline number,
 then emits evidence only when that finished successful pipeline and its repository URL exactly match
-the delivery binding's immutable source revision. It is not instantiated by `gitea-bridge`: this
-Compose file neither deploys Woodpecker nor defines its credentials, pipeline selection, mutation,
-or finalization authority.
+the delivery binding's immutable source revision. It is not instantiated by `gitea-bridge`.
+
+### Optional Woodpecker fixture
+
+The `woodpecker` profile is a small, local-only CI deployment backed by the
+same Gitea service. It is intentionally separate from the delivery bridge:
+Woodpecker produces build evidence only and receives neither City nor Gitea
+bridge credentials.
+
+Create an agent secret, bootstrap the private fixture repository and its
+least-privilege Gitea OAuth application, then start the profile:
+
+```bash
+openssl rand -hex 32  # copy the result to WOODPECKER_AGENT_SECRET in .env
+make woodpecker-up ENV_FILE=.env
+make woodpecker-smoke ENV_FILE=.env
+```
+
+Bootstrap creates the regular `woodpecker-fixture` account and private
+`gascity-compose-fixture` repository. That repository contains a single
+Alpine `.woodpecker.yml` which checks out its `README.md`, writes an artifact
+whose package version is the immutable commit SHA, and publishes it to Gitea's
+generic package registry. Its generated Gitea password is stored as
+`GITEA_WOODPECKER_PASSWORD` in the ignored `.env`; use it to sign into
+`http://127.0.0.1:8000` through Gitea as the fixture user, activate that
+repository, and push a fixture change. Then confirm the registered Gitea
+webhook, successful Woodpecker run for the branch head, and retained artifact:
+
+```bash
+make woodpecker-acceptance ENV_FILE=.env
+```
+
+The server binds only to loopback, accepts only the fixture owner by default,
+and runs one workflow at a time. The Docker agent necessarily owns the Docker
+socket to create step containers; no socket or privileged-plugin permission is
+given to pipeline steps. Keep the fixture repository private and review any
+change that widens `WOODPECKER_REPO_OWNERS` or adds privileged plugins. The
+workflow network is deliberately separate and uses the `gitea` service name
+for API and clone traffic; the browser OAuth flow instead uses
+`WOODPECKER_GITEA_BROWSER_URL` (loopback Gitea by default). Gitea sends its
+webhooks to Woodpecker's internal service address, which is intentionally
+separate from the browser URL. Registration stays closed; only the configured
+fixture admin is admitted. For an external deployment, set both
+`WOODPECKER_HOST` and `WOODPECKER_GITEA_BROWSER_URL` to their stable HTTPS
+browser URLs before bootstrapping the OAuth client, while keeping
+`WOODPECKER_GITEA_URL` and the internal webhook route on Docker-only service
+addresses.
 
 ## Monitoring notes
 

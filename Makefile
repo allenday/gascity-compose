@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -32,3 +32,21 @@ gitea-bridge-up: gitea-bridge-bootstrap
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_ISSUE_URL" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_RUN_ID" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	$(COMPOSE) --profile city --profile gitea-bridge up -d --build gitea-bridge
+
+woodpecker-fixture-bootstrap:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-fixture-bootstrap.sh
+
+woodpecker-preflight:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-preflight.sh
+
+woodpecker-up: bootstrap woodpecker-fixture-bootstrap woodpecker-preflight
+	$(COMPOSE) --profile woodpecker up -d --wait --wait-timeout 90
+
+woodpecker-smoke:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-smoke.sh
+
+woodpecker-acceptance:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-acceptance.sh
+
+test:
+	sh ./scripts/tests/test_woodpecker_fixture.sh
