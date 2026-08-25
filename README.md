@@ -241,7 +241,8 @@ Take a filesystem backup before any production cutover.
 # Pull the selected model only when wanted; it can take substantial disk and time.
 docker compose --profile models run --rm model-init
 
-# Run mcp_agent_mail and the read-only gascity-mcp HTTP service.
+# Run authenticated mcp_agent_mail and the read-only gascity-mcp HTTP service.
+# The City mail bridge bootstrap below creates the required Mail bearer.
 docker compose --profile city --profile mcp up -d --build
 ```
 
@@ -309,6 +310,92 @@ The library also offers evidence-gated issue finalization, but this profile does
 it. Finalization requires the bound run and every step to be completed, fresh acceptance for the
 binding's immutable source, and a current authorized tracker decision. It cannot infer completion
 from a prior gate resolution, and it remains separate from the deployed status projection.
+
+### Tracker-to-City mail intake
+
+The `gitea-mail-bridge` profile is the independent ingress companion to the
+status-only `gitea-bridge`. It accepts signed Gitea issue webhooks, repairs missed
+deliveries with bounded read-only reconciliation, and writes normalized events to
+Mayor's authenticated Agent Mail inbox. It has no City API endpoint, run mutation
+credential, public port, issue writer, or issue-close authority. Its replay ledger
+is isolated at `state/gitea-mail-bridge/ledger.json`.
+
+Configure `INTAKE_REPOSITORY_SCOPES` with exact `owner/repo` values and enumerate
+every City-controlled Gitea login in `INTAKE_CITY_IDENTITIES`. An omitted City bot
+would be classified as an external actor, so this list is an authorization policy,
+not display metadata. `INTAKE_ELIGIBLE_COLLABORATORS` is the exact non-City set
+allowed to apply `gc:intake-approved`; City identities cannot approve themselves.
+The issue repository is the default plan target, while an approved cross-repository
+plan can target only another configured scope.
+
+Bootstrap is idempotent. It creates the restricted read-only bridge account,
+distinct bridge/Mayor/launcher Mail registrations, bidirectional contact grants,
+the two lifecycle labels, and one signed webhook for each scoped repository.
+Secrets are generated only into the ignored mode-0600 environment file:
+
+```bash
+make gitea-mail-bridge-bootstrap ENV_FILE=.env
+make gitea-mail-bridge-up ENV_FILE=.env
+```
+
+Both services remain on the private Compose network. Agent Mail rejects
+unauthenticated requests and the bridge calls its pinned `/mcp` endpoint with a
+server bearer plus its own registration token. The Gitea webhook allow-list names
+only `gitea-mail-bridge` in addition to the existing loopback and Woodpecker hosts.
+
+Mayor's Agent Mail and restricted Gitea MCP bindings live in
+`codex/runpod.config.toml.template`, the profile assigned only through the
+`codex-mayor-runpod` provider. Copy the current `config/city-cost-safe.toml` into
+the mounted City's `.gc/compose/` directory (as described above) before rebuilding
+the City service. Bootstrap writes Mayor's bearer, registration token, project
+slug, and identity to `state/city-mail-secrets/mayor.env`; the Mayor-only provider
+wrapper starts a loopback-only MCP proxy that injects and constrains those values
+server-side, then starts Codex without either credential in its environment or
+Codex-generated tool arguments. The proxy exposes only Mayor's
+inbox/read/ack/send/reply operations
+and rejects another project or identity. Those values therefore do not enter the
+City supervisor, tmux server, Codex process, or dynamic-worker environment. This
+is a role/configuration boundary inside one Unix-UID container, not a separate OS
+security domain. The shared Codex profile intentionally has no Agent Mail or
+issue-writing Gitea server.
+
+Agent Mail writes non-secret notification metadata to its signals directory. The
+City entrypoint watches only Mayor's exact project/identity signal and issues one
+hard-time-bounded `gc session nudge --delivery=wait-idle mayor` per changed signal.
+That queued nudge creates the managed wake
+for the on-demand Mayor and explicitly directs it to fetch authenticated mail,
+follow the installed Superpowers/IDD planning process, and respond visibly on the
+linked issue before waiting on internal ceremony. The tracker bridge itself still
+has no City credential or wake endpoint.
+
+Authority remains intentionally split:
+
+| Component | May do | Must not do |
+| --- | --- | --- |
+| `gitea-mail-bridge` | Read exact scoped tracker state; send authenticated Mayor/launcher mail | Call City, write/close issues, create runs |
+| City mail watcher | Read Mayor's non-secret signal; nudge the exact `mayor` target | Read tracker/Mail credentials, create or bind runs |
+| Mayor | Read its Mail inbox; plan and comment/label through restricted Gitea MCP | Use bridge or launcher identity; bypass human approval |
+| Launcher identity | Return an exact immutable run binding for one authorization | Plan publicly or approve its own work |
+
+Agent Mail requires an absolute path to create a project, while the pinned bridge
+requires the returned slash-free project slug. Configure
+`MCP_AGENT_MAIL_PROJECT_PATH`; bootstrap stores the canonical result in
+`MCP_AGENT_MAIL_PROJECT_KEY`. Do not hand-edit the derived key.
+
+The disposable smoke fixture uses a deliberately reusable configured repository,
+accounts, labels, and webhook. Its only per-run resource is a uniquely titled issue,
+which it closes after proving creation/assignment ingress, logical-event replay,
+authenticated Mayor plan plus fresh human approval, external reply routing, City
+reply suppression, failed-send restart recovery, and binding persistence before
+acknowledgement:
+
+```bash
+make gitea-mail-bridge-smoke ENV_FILE=.env
+```
+
+The fixture deliberately does not start a City run. Its launcher identity returns
+an immutable synthetic run binding through private Mail, which exercises the
+bridge's record-before-ack boundary without granting the bridge launch authority.
 
 Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
 
