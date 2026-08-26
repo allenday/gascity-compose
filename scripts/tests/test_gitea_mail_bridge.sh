@@ -141,6 +141,10 @@ fi
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-smoke.sh"
+for script in gitea-mail-bridge-bootstrap.sh gitea-mail-bridge-smoke.sh gitea-mail-launcher-smoke.sh; do
+  require 'gitea_api="http://gitea:3000/api/v1"|api="http://gitea:3000/api/v1"' "$root/scripts/$script"
+  require 'command curl --connect-to "gitea:3000:127\.0\.0\.1:\$\{gitea_port\}"' "$root/scripts/$script"
+done
 require 'url "\$instance/\$repository/issues/\$issue_number"' "$root/scripts/gitea-mail-bridge-smoke.sh"
 require 'while \[ "\$attempts" -lt 90 \]; do' "$root/scripts/gitea-mail-bridge-smoke.sh"
 if [ "$(grep -Fc 'while [ "$attempts" -lt 90 ]; do' "$root/scripts/gitea-mail-bridge-smoke.sh")" -ne 3 ]; then
