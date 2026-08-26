@@ -44,6 +44,7 @@ service_block city "$city"
 # The intake bridge is a private, independently stateful process with only
 # read-side Gitea and authenticated Agent Mail capabilities.
 require '^  gitea-mail-bridge:$' "$bridge"
+require 'user: 65532:65532' "$bridge"
 require 'source: .*/state/gitea-mail-bridge' "$bridge"
 require 'target: /var/lib/gitea-mail-bridge' "$bridge"
 require 'INTAKE_LEDGER_PATH: /var/lib/gitea-mail-bridge/ledger.json' "$bridge"
@@ -111,6 +112,7 @@ for script in gitea-mail-bridge-bootstrap.sh gitea-mail-bridge-smoke.sh city-mai
 done
 python3 -c 'import pathlib,sys; path=pathlib.Path(sys.argv[1]); compile(path.read_text(), str(path), "exec")' "$root/scripts/city-mail-mcp-proxy.py"
 require 'MCP_AGENT_MAIL_PROJECT_PATH' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'chown -R 65532:65532 state/gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-smoke.sh"

@@ -87,9 +87,10 @@ for key in INTAKE_REPOSITORY_SCOPES INTAKE_CITY_IDENTITIES INTAKE_ELIGIBLE_COLLA
   require_value "$key" >/dev/null
 done
 
-# The bridge writes as the configured host UID/GID. This keeps its durable
-# ledger private without requiring a root-owned bind mount.
+# The bridge always runs as the distroless non-root identity. Keeping its ledger
+# owned by that identity makes the fixture's read-only persistence check real.
 mkdir -p state/gitea-mail-bridge state/city-mail-secrets
+chown -R 65532:65532 state/gitea-mail-bridge
 chmod 0700 state/gitea-mail-bridge state/city-mail-secrets
 
 # Establish both private dependencies before using their administrative APIs.
