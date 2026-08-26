@@ -37,7 +37,11 @@ while ! python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.
   sleep 0.1
 done
 
-/usr/local/bin/codex "$@" &
+# The wrapper needs a child PID to stop the local proxy after Codex exits.
+# In a non-interactive shell, a background child otherwise receives /dev/null
+# for stdin; Codex requires the tmux pane's terminal for both fresh and resumed
+# interactive sessions.
+/usr/local/bin/codex "$@" </dev/tty &
 codex_pid=$!
 if wait "$codex_pid"; then
   codex_status=0
