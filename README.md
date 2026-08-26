@@ -311,6 +311,30 @@ it. Finalization requires the bound run and every step to be completed, fresh ac
 binding's immutable source, and a current authorized tracker decision. It cannot infer completion
 from a prior gate resolution, and it remains separate from the deployed status projection.
 
+### Private Buzz relay
+
+The optional `buzz` profile runs one self-hosted Buzz relay behind the existing
+Tailnet Nginx gateway. The relay has no published host port; Nginx alone binds
+`${TAILNET_IP}:${BUZZ_PORT}` and forwards HTTP and WebSocket traffic to the
+private `buzz-relay` service. Set `BUZZ_RELAY_URL` to that one canonical
+Tailnet `ws://` or TLS-terminated `wss://` URL for human clients. The internal
+Docker hostname is not a client coordinate.
+
+The relay image is pinned to upstream source tag `sha-53771c8`
+(`53771c8f5439f9c5c26876f0229bfcfe5da9b170`) and its OCI manifest digest in
+`compose.yaml`; it does not use `main`, `latest`, or another floating tag.
+The profile persists relay Git data, PostgreSQL, Redis, and MinIO beneath
+`./state/buzz-*`. Before starting, copy `.env.example` to ignored `.env` and
+replace every `CHANGE_ME` Buzz secret with a stable generated value:
+
+```bash
+make buzz-up ENV_FILE=.env
+```
+
+This foundation provides only the private relay and its durable upstream
+dependencies. It does not deploy a Mayor bridge, bootstrap channel membership,
+connect to Agent Mail, or receive Gitea or City credentials.
+
 ### Tracker-to-City mail intake
 
 The `gitea-mail-bridge` profile is the independent ingress companion to the
