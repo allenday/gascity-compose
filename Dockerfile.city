@@ -31,7 +31,8 @@ COPY --from=build /out/bd /usr/local/bin/bd
 COPY --from=build /out/cagent /usr/local/bin/cagent
 COPY --from=dolt /usr/local/bin/dolt /usr/local/bin/dolt
 COPY scripts/city-mail-launcher.sh /usr/local/bin/city-mail-launcher
-RUN chmod 0755 /usr/local/bin/city-mail-launcher && mkdir -p /var/lib/city-mail-launcher && chown -R 1000:1000 /var/lib/city-mail-launcher
+COPY scripts/city_mail_launcher.py /usr/local/bin/city_mail_launcher.py
+RUN chmod 0755 /usr/local/bin/city-mail-launcher /usr/local/bin/city_mail_launcher.py && mkdir -p /var/lib/city-mail-launcher && chown -R 1000:1000 /var/lib/city-mail-launcher
 USER 1000:1000
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/city-mail-launcher"]
 
