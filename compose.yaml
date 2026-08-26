@@ -47,6 +47,7 @@ services:
       args:
         # Pin this to the commit used by the host supervisor before handoff.
         GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
+        GASCITY_REPOSITORY: ${GASCITY_REPOSITORY:-https://github.com/gastownhall/gascity.git}
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
       GC_HOME: /var/lib/gascity
@@ -70,6 +71,9 @@ services:
       CITY_MAIL_WAKE_ENABLED: ${CITY_MAIL_WAKE_ENABLED:-true}
       CITY_MAIL_LOCAL_LAUNCH_ENABLED: ${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}
       CITY_MAIL_LAUNCHER_QUEUE: /var/lib/city-mail-launcher
+      # The local worker runs inside this service, so it needs the same
+      # non-secret, allow-listed formula rig as the Mail-facing sidecar.
+      CITY_MAIL_LAUNCHER_RIG: ${CITY_MAIL_LAUNCHER_RIG:?set CITY_MAIL_LAUNCHER_RIG to the authorized City rig}
       CITY_MAIL_SIGNAL_FILE: /var/lib/mcp-mail-signals/projects/${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}/agents/${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}.signal
       # Non-secret profile settings rendered into ephemeral CODEX_HOME.
       TAILNET_OLLAMA_BASE_URL: ${TAILNET_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -354,6 +358,8 @@ services:
   # fixed Mayor formula. It has no tracker or City HTTP authority.
   city-mail-launcher:
     profiles: [gitea-mail-bridge]
+    # Match the host-mapped City worker so both sides can access the private
+    # queue without relaxing its 0700 directory or 0600 file permissions.
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     build:
       context: .
@@ -361,11 +367,13 @@ services:
       target: launcher-runtime
       args:
         GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
+        GASCITY_REPOSITORY: ${GASCITY_REPOSITORY:-https://github.com/gastownhall/gascity.git}
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
       CITY_MAIL_LAUNCHER_SECRET_FILE: /run/secrets/city-mail/launcher.env
       CITY_MAIL_LAUNCHER_STATE: /var/lib/city-mail-launcher/ledger.json
       CITY_MAIL_LAUNCHER_QUEUE: /var/lib/city-mail-launcher
+      CITY_MAIL_LAUNCHER_RIG: ${CITY_MAIL_LAUNCHER_RIG:?set CITY_MAIL_LAUNCHER_RIG to the authorized City rig}
       CITY_MAIL_LAUNCHER_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
       CITY_MAIL_LAUNCHER_MAIL_URL: http://mcp-agent-mail:8765/mcp
     volumes:

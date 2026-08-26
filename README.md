@@ -397,6 +397,17 @@ The fixture deliberately does not start a City run. Its launcher identity return
 an immutable synthetic run binding through private Mail, which exercises the
 bridge's record-before-ack boundary without granting the bridge launch authority.
 
+For a repeatable operator demo of the real private launcher handoff, use:
+
+```bash
+make gitea-mail-acceptance-demo ENV_FILE=.env
+```
+
+This target reruns the idempotent bootstrap and then creates one fresh disposable issue
+for the real launcher fixture. It does not delete, edit, or reuse failed
+fixture state; preserve that state as acceptance evidence. A successful demo
+proves the real launcher binding only: the real Mayor/formula trace remains a separate Gate D requirement.
+
 Bootstrap the dedicated restricted service-account token and `.env` placeholders with:
 
 ```bash
