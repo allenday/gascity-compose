@@ -234,7 +234,7 @@ if grep -Eq '^INTAKE_ELIGIBLE_COLLABORATORS=' "$root/.env.example"; then
   exit 1
 fi
 require '^minimum_repository_role = "triage"$' "$root/config/gitea-intake.toml"
-require '^repositories = \["admin/gascity-mail-fixture"\]$' "$root/config/gitea-intake.toml"
+require '^repositories = \["admin/gascity-intake-fixture"\]$' "$root/config/gitea-intake.toml"
 require 'fresh disposable issue' "$root/README.md"
 require 'real Mayor/formula trace remains a separate Gate D requirement' "$root/README.md"
 require 'INTAKE_MANIFEST_PATH' "$root/README.md"

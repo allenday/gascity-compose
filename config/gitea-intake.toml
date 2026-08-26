@@ -1,2 +1,2 @@
 minimum_repository_role = "triage"
-repositories = ["admin/gascity-mail-fixture"]
+repositories = ["admin/gascity-intake-fixture"]
