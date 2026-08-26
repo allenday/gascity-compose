@@ -347,6 +347,42 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # The launcher consumes bridge-issued authorizations and can start only the
+  # fixed Mayor formula. It has no tracker or City HTTP authority.
+  city-mail-launcher:
+    profiles: [gitea-mail-bridge]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: .
+      dockerfile: Dockerfile.city
+      target: launcher-runtime
+      args:
+        GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
+        CAGENT_REF: ${CAGENT_REF:-v1.23.0}
+    environment:
+      CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      GC_HOME: /var/lib/gascity
+      CITY_MAIL_LAUNCHER_SECRET_FILE: /run/secrets/city-mail/launcher.env
+      CITY_MAIL_LAUNCHER_STATE: /var/lib/city-mail-launcher/ledger.json
+      CITY_MAIL_LAUNCHER_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
+      CITY_MAIL_LAUNCHER_MAIL_URL: http://mcp-agent-mail:8765/mcp
+    volumes:
+      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
+      - ./state/gc-runtime:/var/lib/gascity
+      - ./state/city-mail-secrets/launcher.env:/run/secrets/city-mail/launcher.env:ro
+      - ./state/city-mail-launcher:/var/lib/city-mail-launcher
+    depends_on:
+      mcp-agent-mail:
+        condition: service_healthy
+      gitea-mail-bridge:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
   gascity-mcp:
     profiles: [mcp]
     build:
