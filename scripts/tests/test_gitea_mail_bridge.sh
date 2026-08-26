@@ -195,6 +195,7 @@ fi
 require 'fresh disposable issue' "$root/README.md"
 require 'real Mayor/formula trace remains a separate Gate D requirement' "$root/README.md"
 require 'machine plan marker must contain only revision and repository JSON fields' "$root/scripts/city-mail-wake.sh"
+require 'must appear only inside the standalone marker' "$root/scripts/city-mail-wake.sh"
 
 wake_tmp="$(mktemp -d)"
 trap 'rm -f "$rendered" "$bridge" "$mail" "$city"; rm -rf "$wake_tmp"' EXIT
@@ -207,6 +208,6 @@ printf '%s\n' '{"message":{"id":17}}' >"$wake_tmp/mayor.signal"
 CITY_PATH=/city CITY_MAIL_SIGNAL_FILE="$wake_tmp/mayor.signal" \
   CITY_MAIL_WAKE_GC="$wake_tmp/fake-gc" CITY_MAIL_WAKE_TEST_LOG="$wake_tmp/log" \
   CITY_MAIL_WAKE_ONCE=true sh "$root/scripts/city-mail-wake.sh"
-require '^--city /city session nudge --delivery=wait-idle mayor You have authenticated tracker mail in Agent Mail\. Fetch it through the Mayor-only Agent Mail MCP binding; follow Superpowers and IDD planning; respond on the linked Gitea issue before internal ceremony\. When publishing an authenticated intake plan, the standalone gascity:intake-plan:v1 machine plan marker must contain only revision and repository JSON fields; use a new revision after every amendment\.$' "$wake_tmp/log"
+require '^--city /city session nudge --delivery=wait-idle mayor You have authenticated tracker mail in Agent Mail\. Fetch it through the Mayor-only Agent Mail MCP binding; follow Superpowers and IDD planning; respond on the linked Gitea issue before internal ceremony\. When publishing an authenticated intake plan, the standalone gascity:intake-plan:v1 machine plan marker must contain only revision and repository JSON fields; its reserved literal must appear only inside the standalone marker; use a new revision after every amendment\.$' "$wake_tmp/log"
 
 printf '%s\n' 'PASS: private City mail issue ingress profile is configured'

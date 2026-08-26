@@ -15,7 +15,7 @@ while :; do
     if [ -n "$current_signal" ] && [ "$current_signal" != "$last_signal" ]; then
       if timeout --signal=TERM "$timeout_seconds" "$gc_command" --city "$CITY_PATH" \
         session nudge --delivery=wait-idle mayor \
-        'You have authenticated tracker mail in Agent Mail. Fetch it through the Mayor-only Agent Mail MCP binding; follow Superpowers and IDD planning; respond on the linked Gitea issue before internal ceremony. When publishing an authenticated intake plan, the standalone gascity:intake-plan:v1 machine plan marker must contain only revision and repository JSON fields; use a new revision after every amendment.' >/dev/null 2>&1; then
+        'You have authenticated tracker mail in Agent Mail. Fetch it through the Mayor-only Agent Mail MCP binding; follow Superpowers and IDD planning; respond on the linked Gitea issue before internal ceremony. When publishing an authenticated intake plan, the standalone gascity:intake-plan:v1 machine plan marker must contain only revision and repository JSON fields; its reserved literal must appear only inside the standalone marker; use a new revision after every amendment.' >/dev/null 2>&1; then
         last_signal="$current_signal"
         if [ "${CITY_MAIL_WAKE_ONCE:-false}" = "true" ]; then
           exit 0
