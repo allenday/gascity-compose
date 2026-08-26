@@ -59,4 +59,8 @@ if [ "${CITY_MAIL_WAKE_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-wake &
 fi
 
+if [ "${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}" = "true" ]; then
+  /usr/local/bin/city-mail-local-launch &
+fi
+
 exec gc supervisor run

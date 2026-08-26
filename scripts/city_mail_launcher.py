@@ -60,6 +60,13 @@ def binding_for(message: dict[str, object], run_id: str) -> dict[str, object]:
     }
 
 
+def request_for(message: dict[str, object]) -> dict[str, object]:
+    validate_authorization(message)
+    payload = message["payload"]
+    assert isinstance(payload, dict)
+    return {"authorization_id": payload["id"], "formula": "superpowers-build", "target": "mayor", "message": message}
+
+
 def record_before_ack(ledger_path: str | Path, authorization_id: str, run_id: str, acknowledge: Callable[[], None]) -> tuple[str, bool]:
     path = Path(ledger_path)
     try:
@@ -124,6 +131,38 @@ def _existing_run(path: str, authorization_id: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, separators=(",", ":"), sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, path)
+
+
+def city_worker() -> None:
+    queue = Path(os.environ["CITY_MAIL_LAUNCHER_QUEUE"])
+    while True:
+        for request_path in sorted((queue / "requests").glob("*.json")):
+            response_path = queue / "responses" / request_path.name
+            if response_path.exists():
+                continue
+            try:
+                request = json.loads(request_path.read_text())
+                if request.get("formula") != "superpowers-build" or request.get("target") != "mayor":
+                    raise ValueError("unsupported City launch request")
+                message = validate_authorization(request["message"])
+                payload = message["payload"]
+                assert isinstance(payload, dict)
+                issue = payload["issue"]
+                assert isinstance(issue, dict)
+                launched = subprocess.run(["gc", "--city", os.environ["CITY_PATH"], "sling", "mayor", f"Gitea intake authorization {payload['id']} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}", "--on", "superpowers-build", "--json"], check=True, text=True, capture_output=True, timeout=120)
+                _write_json(response_path, {"run_id": json.loads(launched.stdout)["bead_id"]})
+            except (KeyError, ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+                continue
+        time.sleep(1)
+
+
 def serve() -> None:
     secret = _secrets(os.environ["CITY_MAIL_LAUNCHER_SECRET_FILE"])
     state = os.environ["CITY_MAIL_LAUNCHER_STATE"]
@@ -142,11 +181,14 @@ def serve() -> None:
                     auth_id = str(payload["id"])
                     run_id = _existing_run(state, auth_id)
                     if not run_id:
-                        issue = payload["issue"]
-                        assert isinstance(issue, dict)
-                        launch_text = f"Gitea intake authorization {auth_id} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}"
-                        launched = subprocess.run(["gc", "--city", os.environ["CITY_PATH"], "sling", "mayor", launch_text, "--on", "superpowers-build", "--json"], check=True, text=True, capture_output=True)
-                        run_id = json.loads(launched.stdout)["bead_id"]
+                        queue = Path(os.environ["CITY_MAIL_LAUNCHER_QUEUE"])
+                        request_path = queue / "requests" / f"{auth_id}.json"
+                        response_path = queue / "responses" / f"{auth_id}.json"
+                        if not request_path.exists():
+                            _write_json(request_path, request_for(message))
+                        if not response_path.exists():
+                            continue
+                        run_id = json.loads(response_path.read_text())["run_id"]
                     binding = binding_for(message, run_id)
                     _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "send_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "sender_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "sender_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "to":[bridge], "subject":f"gc.run.binding.{auth_id}", "body_md":json.dumps(binding, separators=(",", ":")), "thread_id":message.get("thread_id"), "topic":f"gc-binding-{auth_id}", "ack_required":True})
                     record_before_ack(state, auth_id, run_id, lambda: _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "acknowledge_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "agent_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "registration_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "message_id":envelope["id"]}))
@@ -158,4 +200,4 @@ def serve() -> None:
 
 
 if __name__ == "__main__":
-    serve()
+    city_worker() if os.environ.get("CITY_MAIL_LOCAL_LAUNCHER_WORKER") == "true" else serve()
