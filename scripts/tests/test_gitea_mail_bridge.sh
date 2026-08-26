@@ -148,6 +148,12 @@ require 'chown -R "\$launcher_uid:\$launcher_gid" state/city-mail-launcher' "$ro
 require 'sh ./scripts/gitea-intake-doctor.sh' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'INTAKE_MANIFEST_PATH' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'INTAKE_MINIMUM_REPOSITORY_ROLE' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+agent_mail_stop_line="$(grep -n 'stop mcp-agent-mail' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+bootstrap_line="$(grep -n 'sh ./scripts/bootstrap.sh' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+if [ -z "$agent_mail_stop_line" ] || [ -z "$bootstrap_line" ] || [ "$agent_mail_stop_line" -ge "$bootstrap_line" ]; then
+  printf '%s\n' 'bootstrap must quiesce Agent Mail before reconciling its state ownership' >&2
+  exit 1
+fi
 doctor_line="$(grep -n 'sh ./scripts/gitea-intake-doctor.sh --format env' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 operator_token_line="$(grep -n 'gascity-mail-bridge-operator-v2' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 fixture_create_line="$(grep -n '\$gitea_api/user/repos' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"

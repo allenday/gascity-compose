@@ -83,6 +83,11 @@ for key in MCP_AGENT_MAIL_BEARER_TOKEN GITEA_MAIL_BRIDGE_WEBHOOK_SECRET; do
   fi
 done
 
+# Agent Mail persists live lock files under the path whose ownership the base
+# bootstrap reconciles. Quiesce it before that ownership transition; this
+# script starts it again before any Mail API calls below.
+compose --profile mcp stop mcp-agent-mail
+
 # Establish the base stack before validating or mutating intake resources.
 ENV_FILE="$env_file" sh ./scripts/bootstrap.sh
 
