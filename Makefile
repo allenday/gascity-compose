@@ -42,6 +42,9 @@ gitea-mail-bridge-up: gitea-mail-bridge-bootstrap
 gitea-mail-launcher-up: gitea-mail-bridge-bootstrap
 	$(COMPOSE) --profile mcp --profile gitea-mail-bridge up -d --build --wait --wait-timeout 180 gitea-mail-bridge city-mail-launcher
 
+gitea-mail-launcher-smoke:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-launcher-smoke.sh
+
 gitea-mail-bridge-smoke:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-bridge-smoke.sh
 
