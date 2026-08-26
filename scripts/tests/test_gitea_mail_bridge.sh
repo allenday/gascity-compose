@@ -123,7 +123,7 @@ if grep -Eq 'MCP_AGENT_MAIL_(BEARER|MAYOR_REGISTRATION)_TOKEN' "$root/config/cit
   exit 1
 fi
 
-for script in gitea-mail-bridge-bootstrap.sh gitea-mail-bridge-smoke.sh gitea-mail-launcher-smoke.sh city-mail-wake.sh codex-mayor; do
+for script in gitea-mail-bridge-bootstrap.sh gitea-mail-bridge-smoke.sh gitea-mail-launcher-smoke.sh gitea-mail-acceptance-demo.sh city-mail-wake.sh codex-mayor; do
   sh -n "$root/scripts/$script"
 done
 python3 -c 'import pathlib,sys; path=pathlib.Path(sys.argv[1]); compile(path.read_text(), str(path), "exec")' "$root/scripts/city-mail-mcp-proxy.py"
@@ -162,9 +162,21 @@ require '^gitea-mail-bridge-up:' "$root/Makefile"
 require '^gitea-mail-bridge-smoke:' "$root/Makefile"
 require '^gitea-mail-launcher-up:' "$root/Makefile"
 require '^gitea-mail-launcher-smoke:' "$root/Makefile"
+require '^gitea-mail-acceptance-demo:' "$root/Makefile"
 require 'PASS: real City launcher fixture issue #' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'gitea-mail-launcher-up' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'smoke-run-' "$root/scripts/gitea-mail-launcher-smoke.sh"
+require 'while \[ "\$readiness_attempts" -lt 180 \]; do' "$root/scripts/gitea-mail-launcher-smoke.sh"
+require 'gitea-mail-launcher-up' "$root/scripts/gitea-mail-acceptance-demo.sh"
+require 'CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP=true' "$root/scripts/gitea-mail-acceptance-demo.sh"
+require 'CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP:-false' "$root/scripts/gitea-mail-launcher-smoke.sh"
+require 'gitea-mail-launcher-smoke' "$root/scripts/gitea-mail-acceptance-demo.sh"
+if grep -Fq 'gitea-mail-bridge-bootstrap' "$root/scripts/gitea-mail-acceptance-demo.sh"; then
+  printf '%s\n' 'acceptance demo must delegate bootstrap exactly once through launcher-up' >&2
+  exit 1
+fi
+require 'fresh disposable issue' "$root/README.md"
+require 'real Mayor/formula trace remains a separate Gate D requirement' "$root/README.md"
 
 wake_tmp="$(mktemp -d)"
 trap 'rm -f "$rendered" "$bridge" "$mail" "$city"; rm -rf "$wake_tmp"' EXIT

@@ -9,7 +9,19 @@ admin="$(required STACK_USERNAME)"; token="$(required GITEA_MAIL_BRIDGE_ADMIN_TO
 repository="$admin/$(required GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"; port="$(value GITEA_HTTP_PORT)"; port="${port:-3002}"; api="http://127.0.0.1:${port}/api/v1"; issue_number=""
 cleanup() { if [ -n "$issue_number" ]; then curl --silent --user "$admin:$token" -H 'Content-Type: application/json' -X PATCH "$api/repos/$repository/issues/$issue_number" --data '{"state":"closed"}' >/dev/null || true; fi; }
 trap cleanup EXIT
-make gitea-mail-launcher-up ENV_FILE="$env_file"
+if [ "${CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP:-false}" != true ]; then
+  make gitea-mail-launcher-up ENV_FILE="$env_file"
+fi
+readiness_attempts=0
+while [ "$readiness_attempts" -lt 180 ]; do
+  if compose exec -T mcp-agent-mail python3 -c 'import urllib.request; body=urllib.request.urlopen("http://gitea-mail-bridge:8080/readyz",timeout=5).read(); raise SystemExit(0 if body == b"ready" else 1)' >/dev/null 2>&1; then
+    break
+  fi
+  readiness_attempts=$((readiness_attempts + 1)); sleep 1
+done
+if [ "$readiness_attempts" -eq 180 ]; then
+  printf '%s\n' 'ERROR: bridge did not become ready before launcher fixture' >&2; exit 1
+fi
 mayor="$(required INTAKE_ACCOUNT)"; mayor_token="$(required GITEA_MAYOR_TOKEN)"
 issue="$(curl --fail --silent --user "$admin:$token" -H 'Content-Type: application/json' -X POST "$api/repos/$repository/issues" --data "$(jq -nc --arg mayor "$mayor" '{title:"Real City launcher fixture",body:"Disposable Gate D launcher fixture",assignees:[$mayor]}')")"; issue_number="$(printf '%s' "$issue" | jq -er '.number')"
 labels="$(curl --fail --silent -H "Authorization: token $mayor_token" "$api/repos/$repository/labels?limit=100")"; managed="$(printf '%s' "$labels" | jq -er '.[] | select(.name == "gc:city-managed") | .id')"; approved="$(printf '%s' "$labels" | jq -er --arg name "$(required INTAKE_APPROVAL_LABEL)" '.[] | select(.name == $name) | .id')"
