@@ -168,6 +168,7 @@ require 'PASS: real City launcher fixture issue #' "$root/scripts/gitea-mail-lau
 require 'gitea-mail-launcher-up' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'smoke-run-' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'while \[ "\$readiness_attempts" -lt 180 \]; do' "$root/scripts/gitea-mail-launcher-smoke.sh"
+require 'body\.strip\(\) == b"ready"' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'gitea-mail-launcher-up' "$root/scripts/gitea-mail-acceptance-demo.sh"
 require 'CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP=true' "$root/scripts/gitea-mail-acceptance-demo.sh"
 require 'CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP:-false' "$root/scripts/gitea-mail-launcher-smoke.sh"

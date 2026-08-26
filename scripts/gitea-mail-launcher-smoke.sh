@@ -14,7 +14,7 @@ if [ "${CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP:-false}" != true ]; then
 fi
 readiness_attempts=0
 while [ "$readiness_attempts" -lt 180 ]; do
-  if compose exec -T mcp-agent-mail python3 -c 'import urllib.request; body=urllib.request.urlopen("http://gitea-mail-bridge:8080/readyz",timeout=5).read(); raise SystemExit(0 if body == b"ready" else 1)' >/dev/null 2>&1; then
+  if compose exec -T mcp-agent-mail python3 -c 'import urllib.request; body=urllib.request.urlopen("http://gitea-mail-bridge:8080/readyz",timeout=5).read(); raise SystemExit(0 if body.strip() == b"ready" else 1)' >/dev/null 2>&1; then
     break
   fi
   readiness_attempts=$((readiness_attempts + 1)); sleep 1
