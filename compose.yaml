@@ -292,7 +292,9 @@ services:
   # gitea-bridge. It has no City API, issue-write, or run-mutation credential.
   gitea-mail-bridge:
     profiles: [gitea-mail-bridge]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # Keep the bridge unprivileged even when the host operator uses UID 0.
+    # Its ledger bind mount is owned by this distroless non-root identity.
+    user: "65532:65532"
     build:
       context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
       args:
