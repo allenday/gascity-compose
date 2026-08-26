@@ -32,6 +32,18 @@ class LauncherProtocolTest(unittest.TestCase):
         self.assertEqual("auth-1", request["authorization_id"])
         self.assertEqual("superpowers-build", request["formula"])
 
+    def test_inbox_request_includes_message_bodies(self):
+        self.assertEqual(
+            {
+                "project_key": "project",
+                "agent_name": "gas-city-launcher",
+                "registration_token": "registration",
+                "limit": 100,
+                "include_bodies": True,
+            },
+            launcher.inbox_arguments("project", "gas-city-launcher", "registration"),
+        )
+
     def test_rejects_missing_immutable_base(self):
         with self.assertRaisesRegex(ValueError, "pinned_base"):
             invalid = {**MESSAGE, "payload": {key: value for key, value in MESSAGE["payload"].items() if key != "pinned_base"}}

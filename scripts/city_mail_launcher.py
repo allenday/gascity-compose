@@ -67,6 +67,10 @@ def request_for(message: dict[str, object]) -> dict[str, object]:
     return {"authorization_id": payload["id"], "formula": "superpowers-build", "target": "mayor", "message": message}
 
 
+def inbox_arguments(project_key: str, agent_name: str, registration_token: str) -> dict[str, object]:
+    return {"project_key": project_key, "agent_name": agent_name, "registration_token": registration_token, "limit": 100, "include_bodies": True}
+
+
 def record_before_ack(ledger_path: str | Path, authorization_id: str, run_id: str, acknowledge: Callable[[], None]) -> tuple[str, bool]:
     path = Path(ledger_path)
     try:
@@ -170,7 +174,7 @@ def serve() -> None:
     url = os.environ["CITY_MAIL_LAUNCHER_MAIL_URL"]
     while True:
         try:
-            inbox = _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "fetch_inbox", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "agent_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "registration_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "limit":100})
+            inbox = _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "fetch_inbox", inbox_arguments(secret["MCP_AGENT_MAIL_PROJECT_KEY"], secret["MCP_AGENT_MAIL_AGENT_NAME"], secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"]))
             for envelope in inbox if isinstance(inbox, list) else []:
                 if not str(envelope.get("subject", "")).startswith("gc.intake.start-authorized."):
                     continue
