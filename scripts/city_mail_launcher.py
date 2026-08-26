@@ -71,6 +71,15 @@ def inbox_arguments(project_key: str, agent_name: str, registration_token: str) 
     return {"project_key": project_key, "agent_name": agent_name, "registration_token": registration_token, "limit": 100, "include_bodies": True}
 
 
+def city_launch_command(request: dict[str, object], city_path: str) -> list[str]:
+    message = validate_authorization(request["message"])
+    payload = message["payload"]
+    assert isinstance(payload, dict)
+    issue = payload["issue"]
+    assert isinstance(issue, dict)
+    return ["gc", "--city", city_path, "sling", "mayor", f"Gitea intake authorization {payload['id']} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}", "--var", f"artifact_root={city_path}", "--on", "superpowers-build", "--json"]
+
+
 def record_before_ack(ledger_path: str | Path, authorization_id: str, run_id: str, acknowledge: Callable[[], None]) -> tuple[str, bool]:
     path = Path(ledger_path)
     try:
@@ -149,20 +158,17 @@ def city_worker() -> None:
     while True:
         for request_path in sorted((queue / "requests").glob("*.json")):
             response_path = queue / "responses" / request_path.name
-            if response_path.exists():
+            failure_path = queue / "failures" / request_path.name
+            if response_path.exists() or failure_path.exists():
                 continue
             try:
                 request = json.loads(request_path.read_text())
                 if request.get("formula") != "superpowers-build" or request.get("target") != "mayor":
                     raise ValueError("unsupported City launch request")
-                message = validate_authorization(request["message"])
-                payload = message["payload"]
-                assert isinstance(payload, dict)
-                issue = payload["issue"]
-                assert isinstance(issue, dict)
-                launched = subprocess.run(["gc", "--city", os.environ["CITY_PATH"], "sling", "mayor", f"Gitea intake authorization {payload['id']} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}", "--on", "superpowers-build", "--json"], check=True, text=True, capture_output=True, timeout=120)
+                launched = subprocess.run(city_launch_command(request, os.environ["CITY_PATH"]), check=True, text=True, capture_output=True, timeout=120)
                 _write_json(response_path, {"run_id": json.loads(launched.stdout)["bead_id"]})
-            except (KeyError, ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+            except (KeyError, ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+                _write_json(failure_path, {"error": type(error).__name__})
                 continue
         time.sleep(1)
 

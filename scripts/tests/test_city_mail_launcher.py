@@ -32,6 +32,11 @@ class LauncherProtocolTest(unittest.TestCase):
         self.assertEqual("auth-1", request["authorization_id"])
         self.assertEqual("superpowers-build", request["formula"])
 
+    def test_city_launch_command_supplies_required_artifact_root(self):
+        command = launcher.city_launch_command(launcher.request_for(MESSAGE), "/opt/gascity/my-city")
+        self.assertEqual(["--var", "artifact_root=/opt/gascity/my-city"], command[-5:-3])
+        self.assertEqual(["--on", "superpowers-build", "--json"], command[-3:])
+
     def test_inbox_request_includes_message_bodies(self):
         self.assertEqual(
             {
