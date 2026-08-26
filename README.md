@@ -320,12 +320,16 @@ Mayor's authenticated Agent Mail inbox. It has no City API endpoint, run mutatio
 credential, public port, issue writer, or issue-close authority. Its replay ledger
 is isolated at `state/gitea-mail-bridge/ledger.json`.
 
-Configure `INTAKE_REPOSITORY_SCOPES` with exact `owner/repo` values and enumerate
-every City-controlled Gitea login in `INTAKE_CITY_IDENTITIES`. An omitted City bot
-would be classified as an external actor, so this list is an authorization policy,
-not display metadata. `INTAKE_ELIGIBLE_COLLABORATORS` is the exact non-City set
-allowed to apply `gc:intake-approved`; City identities cannot approve themselves.
-The issue repository is the default plan target, while an approved cross-repository
+Configure `INTAKE_MANIFEST_PATH` with a tracked manifest such as
+`config/gitea-intake.toml`. The `gitea-intake-doctor` preflight derives
+`INTAKE_REPOSITORY_SCOPES`, `INTAKE_CITY_IDENTITIES`, and
+`INTAKE_MINIMUM_REPOSITORY_ROLE` from that manifest, so Compose no longer treats
+an operator-maintained human allow-list as authority. The fixed Gitea role
+accounts are `gascity-mcp-mayor`, `gascity-mail-bridge`, and
+`gascity-mail-launcher`; bootstrap creates or verifies them as restricted,
+non-admin users. The controller accepts Mayor assignment and approval only from
+a current non-City Gitea collaborator with `triage` or stronger access. The
+issue repository is the default plan target, while an approved cross-repository
 plan can target only another configured scope.
 
 Bootstrap is idempotent. It creates the restricted read-only bridge account,
@@ -334,9 +338,15 @@ the two lifecycle labels, and one signed webhook for each scoped repository.
 Secrets are generated only into the ignored mode-0600 environment file:
 
 ```bash
+make gitea-intake-doctor ENV_FILE=.env
 make gitea-mail-bridge-bootstrap ENV_FILE=.env
 make gitea-mail-bridge-up ENV_FILE=.env
 ```
+
+Removing a repository from the manifest stops new intake after redeploy because
+bootstrap reconciles only the current manifest scopes. That removal is
+non-destructive: it does not delete prior labels, webhooks, users, or ledger history,
+so old evidence remains intact while new intake ceases for the removed repository.
 
 Both services remain on the private Compose network. Agent Mail rejects
 unauthenticated requests and the bridge calls its pinned `/mcp` endpoint with a

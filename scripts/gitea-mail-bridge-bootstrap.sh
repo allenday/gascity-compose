@@ -83,27 +83,45 @@ for key in MCP_AGENT_MAIL_BEARER_TOKEN GITEA_MAIL_BRIDGE_WEBHOOK_SECRET; do
   fi
 done
 
-for key in INTAKE_REPOSITORY_SCOPES INTAKE_CITY_IDENTITIES INTAKE_ELIGIBLE_COLLABORATORS; do
-  require_value "$key" >/dev/null
-done
-
-# Stop any prior bridge before taking ownership of its durable ledger. Otherwise
-# an older root-run container can atomically replace the file during migration.
-compose --profile gitea-mail-bridge stop gitea-mail-bridge
-
-# The bridge always runs as the distroless non-root identity. Keeping its ledger
-# owned by that identity makes the fixture's read-only persistence check real.
-mkdir -p state/gitea-mail-bridge state/city-mail-secrets
-chown -R 65532:65532 state/gitea-mail-bridge
-chmod 0700 state/gitea-mail-bridge state/city-mail-secrets
-
-# Establish both private dependencies before using their administrative APIs.
+# Establish the base stack before validating or mutating intake resources.
 ENV_FILE="$env_file" sh ./scripts/bootstrap.sh
-compose --profile mcp up -d --wait --wait-timeout 90 mcp-agent-mail
 
 admin="$(require_value STACK_USERNAME)"
-# Password API authentication is commonly disabled. Use a private, scoped
-# operator token instead; Gitea accepts it in the existing Basic request form.
+manifest_path="$(require_value INTAKE_MANIFEST_PATH)"
+test -n "$manifest_path"
+gitea_port="$(value_for GITEA_HTTP_PORT)"
+gitea_port="${gitea_port:-3002}"
+# Keep Gitea's generated issue URLs canonical for the private bridge.  The
+# operator reaches the published host port, while --connect-to preserves the
+# internal Host authority that Gitea serializes into signed webhook payloads.
+gitea_api="http://gitea:3000/api/v1"
+curl() {
+  command curl --connect-to "gitea:3000:127.0.0.1:${gitea_port}" "$@"
+}
+
+manifest_file() {
+  case "$manifest_path" in
+    /*) printf '%s\n' "$manifest_path" ;;
+    *) printf '%s/%s\n' "$(dirname "$env_file")" "$manifest_path" ;;
+  esac
+}
+
+manifest_repositories() {
+  python3 - "$(manifest_file)" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    data = tomllib.load(handle)
+
+for repository in data.get("repositories", []):
+    print(repository)
+PY
+}
+
+# Password API authentication is commonly disabled. Reconcile a scoped operator
+# token before the read-only doctor so the fixture preflight can use the same
+# exact operator authority as the mutating path.
 admin_password="$(value_for GITEA_MAIL_BRIDGE_ADMIN_TOKEN)"
 admin_token_version="$(value_for GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION)"
 if [ -z "$admin_password" ] || [ "$admin_token_version" != 2 ]; then
@@ -116,22 +134,51 @@ if [ -z "$admin_password" ] || [ "$admin_token_version" != 2 ]; then
   set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN "$admin_password"
   set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION 2
 fi
-gitea_port="$(value_for GITEA_HTTP_PORT)"
-gitea_port="${gitea_port:-3002}"
-# Keep Gitea's generated issue URLs canonical for the private bridge.  The
-# operator reaches the published host port, while --connect-to preserves the
-# internal Host authority that Gitea serializes into signed webhook payloads.
-gitea_api="http://gitea:3000/api/v1"
-curl() {
-  command curl --connect-to "gitea:3000:127.0.0.1:${gitea_port}" "$@"
-}
+
+# The disposable default fixture is the only repository bootstrap may create.
+# When its exact admin/repo scope is declared in the manifest, create it before
+# the doctor runs so fresh demo stacks pass read-only preflight.
+fixture_repo="$(value_for GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"
+if [ -n "$fixture_repo" ] && manifest_repositories | grep -Fxq "$admin/$fixture_repo"; then
+  if ! curl --fail --silent --show-error --user "$admin:$admin_password" \
+    "$gitea_api/repos/$admin/$fixture_repo" >/dev/null 2>&1; then
+    curl --fail --silent --show-error --user "$admin:$admin_password" \
+      -H 'Content-Type: application/json' \
+      -X POST "$gitea_api/user/repos" \
+      --data "$(jq -nc --arg name "$fixture_repo" '{name:$name,private:true,auto_init:true,default_branch:"main",has_issues:true}')" >/dev/null
+  fi
+fi
+
+doctor_output="$(ENV_FILE="$env_file" sh ./scripts/gitea-intake-doctor.sh --format env)"
+for derived_key in INTAKE_ACCOUNT INTAKE_REPOSITORY_SCOPES INTAKE_CITY_IDENTITIES INTAKE_MINIMUM_REPOSITORY_ROLE; do
+  derived_value="$(printf '%s\n' "$doctor_output" | awk -F= -v key="$derived_key" '$1 == key { print substr($0, length(key) + 2); exit }')"
+  [ -n "$derived_value" ] || {
+    printf '%s\n' "ERROR: intake doctor did not return $derived_key" >&2
+    exit 1
+  }
+  set_value "$derived_key" "$derived_value"
+done
 
 intake_account="$(require_value INTAKE_ACCOUNT)"
-bridge_login="gas-city-mail-bridge"
+bridge_login="gascity-mail-bridge"
+launcher_login="gascity-mail-launcher"
+
+# Stop any prior bridge before taking ownership of its durable ledger. Otherwise
+# an older root-run container can atomically replace the file during migration.
+compose --profile gitea-mail-bridge stop gitea-mail-bridge
+
+# The bridge always runs as the distroless non-root identity. Keeping its ledger
+# owned by that identity makes the fixture's read-only persistence check real.
+mkdir -p state/gitea-mail-bridge state/city-mail-secrets
+chown -R 65532:65532 state/gitea-mail-bridge
+chmod 0700 state/gitea-mail-bridge state/city-mail-secrets
+
+compose --profile mcp up -d --wait --wait-timeout 90 mcp-agent-mail
+
 user_record() {
   compose exec -T gitea gitea admin user list | awk -v login="$1" '$2 == login { print $1; exit }'
 }
-for identity in "$intake_account" "$bridge_login"; do
+for identity in "$intake_account" "$bridge_login" "$launcher_login"; do
   if [ -z "$(user_record "$identity")" ]; then
     password="$(random_secret)"
     compose exec -T gitea gitea admin user create \
@@ -146,7 +193,7 @@ done
 if [ -z "$(value_for GITEA_MAIL_BRIDGE_TOKEN)" ]; then
   token="$(compose exec -T gitea gitea admin user generate-access-token \
     --username "$bridge_login" \
-    --token-name gas-city-mail-bridge \
+    --token-name gascity-mail-bridge \
     --scopes 'read:user,read:repository,read:issue' \
     --raw)"
   test -n "$token"
@@ -169,22 +216,12 @@ mayor_actor_id="$(user_record "$intake_account")"
 test -n "$mayor_actor_id"
 set_value INTAKE_MAYOR_ACTOR_ID "$mayor_actor_id"
 
-# The example scope is a disposable repository. Production scopes must already
-# exist; bootstrap never creates an arbitrary repository named by policy.
-fixture_repo="$(value_for GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"
-if [ -n "$fixture_repo" ] && printf '%s' "$(require_value INTAKE_REPOSITORY_SCOPES)" | tr ',' '\n' | grep -Fxq "$admin/$fixture_repo"; then
-  if ! curl --fail --silent --show-error --user "$admin:$admin_password" \
-    "$gitea_api/repos/$admin/$fixture_repo" >/dev/null 2>&1; then
-    curl --fail --silent --show-error --user "$admin:$admin_password" \
-      -H 'Content-Type: application/json' \
-      -X POST "$gitea_api/user/repos" \
-      --data "$(jq -nc --arg name "$fixture_repo" '{name:$name,private:true,auto_init:true,default_branch:"main",has_issues:true}')" >/dev/null
-  fi
-fi
-
 webhook_url="http://gitea-mail-bridge:8080/v1/gitea/webhook"
 webhook_secret="$(require_value GITEA_MAIL_BRIDGE_WEBHOOK_SECRET)"
 approval_label="$(require_value INTAKE_APPROVAL_LABEL)"
+# Reconcile only the repositories still declared in the current manifest. A
+# later manifest removal stops new intake after redeploy, but leaves prior
+# labels, webhooks, and ledger history intact as durable evidence.
 for repository in $(printf '%s' "$(require_value INTAKE_REPOSITORY_SCOPES)" | tr ',' ' '); do
   owner="${repository%%/*}"
   repo="${repository#*/}"

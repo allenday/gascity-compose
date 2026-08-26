@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -32,6 +32,9 @@ gitea-bridge-up: gitea-bridge-bootstrap
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_ISSUE_URL" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	@test -n "$$(awk -F= '$$1=="GITEA_BRIDGE_RUN_ID" {print substr($$0,length($$1)+2)}' $(ENV_FILE))"
 	$(COMPOSE) --profile city --profile gitea-bridge up -d --build gitea-bridge
+
+gitea-intake-doctor:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-intake-doctor.sh
 
 gitea-mail-bridge-bootstrap:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-bridge-bootstrap.sh

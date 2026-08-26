@@ -7,7 +7,8 @@ bridge="$(mktemp)"
 mail="$(mktemp)"
 city="$(mktemp)"
 launcher="$(mktemp)"
-trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher"' EXIT
+doctor_tmp="$(mktemp -d)"
+trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher"; rm -rf "$doctor_tmp"' EXIT
 
 # The bridge profile is operationally self-contained: callers must not need to
 # know or enable Agent Mail's implementation profile separately.
@@ -55,12 +56,17 @@ require 'INTAKE_MAIL_URL: http://mcp-agent-mail:8765/mcp' "$bridge"
 require 'gitea:' "$bridge"
 require 'condition: service_healthy' "$bridge"
 require 'mcp-agent-mail:' "$bridge"
+require 'INTAKE_MINIMUM_REPOSITORY_ROLE: triage' "$bridge"
 if grep -Eq '^    ports:' "$bridge"; then
   printf '%s\n' 'gitea-mail-bridge must not publish a host port' >&2
   exit 1
 fi
 if grep -Eq 'GASCITY_API_URL|GASCITY_RUN_ID|GITEA_ISSUE_URL' "$bridge"; then
   printf '%s\n' 'gitea-mail-bridge must not receive City mutation or status-bridge bindings' >&2
+  exit 1
+fi
+if grep -Eq 'INTAKE_ELIGIBLE_COLLABORATORS' "$bridge"; then
+  printf '%s\n' 'gitea-mail-bridge must not accept operator-maintained human eligibility lists' >&2
   exit 1
 fi
 
@@ -139,6 +145,29 @@ require 'chown -R 65532:65532 state/gitea-mail-bridge' "$root/scripts/gitea-mail
 require 'launcher_uid="\$\(value_for HOST_UID\)"' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'launcher_gid="\$\(value_for HOST_GID\)"' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'chown -R "\$launcher_uid:\$launcher_gid" state/city-mail-launcher' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'sh ./scripts/gitea-intake-doctor.sh' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'INTAKE_MANIFEST_PATH' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'INTAKE_MINIMUM_REPOSITORY_ROLE' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+doctor_line="$(grep -n 'sh ./scripts/gitea-intake-doctor.sh --format env' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+operator_token_line="$(grep -n 'gascity-mail-bridge-operator-v2' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+fixture_create_line="$(grep -n '\$gitea_api/user/repos' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+user_create_line="$(grep -n 'gitea admin user create' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
+if [ -z "$doctor_line" ] || [ -z "$operator_token_line" ] || [ -z "$fixture_create_line" ] || [ -z "$user_create_line" ]; then
+  printf '%s\n' 'bootstrap ordering probes are missing' >&2
+  exit 1
+fi
+if [ "$operator_token_line" -ge "$doctor_line" ]; then
+  printf '%s\n' 'bootstrap must reconcile the operator token before running the intake doctor' >&2
+  exit 1
+fi
+if [ "$fixture_create_line" -ge "$doctor_line" ]; then
+  printf '%s\n' 'bootstrap must create the declared default fixture repository before running the intake doctor' >&2
+  exit 1
+fi
+if [ "$doctor_line" -ge "$user_create_line" ]; then
+  printf '%s\n' 'bootstrap must run the read-only intake doctor before role and repository mutations' >&2
+  exit 1
+fi
 bridge_stop_line="$(grep -n 'stop gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 ledger_chown_line="$(grep -n 'chown -R 65532:65532 state/gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 if [ -z "$bridge_stop_line" ] || [ "$bridge_stop_line" -ge "$ledger_chown_line" ]; then
@@ -172,12 +201,16 @@ require 'collaborators/\$bridge_login' "$root/scripts/gitea-mail-bridge-bootstra
 require 'permission":"read' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'collaborators/\$intake_account' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'permission":"write' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'gascity-mcp-mayor' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'gascity-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'gascity-mail-launcher' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '^gitea-mail-bridge-bootstrap:' "$root/Makefile"
 require '^gitea-mail-bridge-up:' "$root/Makefile"
 require '^gitea-mail-bridge-smoke:' "$root/Makefile"
 require '^gitea-mail-launcher-up:' "$root/Makefile"
 require '^gitea-mail-launcher-smoke:' "$root/Makefile"
 require '^gitea-mail-acceptance-demo:' "$root/Makefile"
+require '^gitea-intake-doctor:' "$root/Makefile"
 require 'CITY_MAIL_LAUNCHER_RIG: my-project' "$root/.github/workflows/ci.yml"
 require 'PASS: real City launcher fixture issue #' "$root/scripts/gitea-mail-launcher-smoke.sh"
 require 'gitea-mail-launcher-up' "$root/scripts/gitea-mail-launcher-smoke.sh"
@@ -192,13 +225,28 @@ if grep -Fq 'gitea-mail-bridge-bootstrap' "$root/scripts/gitea-mail-acceptance-d
   printf '%s\n' 'acceptance demo must delegate bootstrap exactly once through launcher-up' >&2
   exit 1
 fi
+require '^INTAKE_MANIFEST_PATH=./config/gitea-intake.toml$' "$root/.env.example"
+require '^INTAKE_REPOSITORY_SCOPES=$' "$root/.env.example"
+require '^INTAKE_CITY_IDENTITIES=$' "$root/.env.example"
+require '^INTAKE_MINIMUM_REPOSITORY_ROLE=$' "$root/.env.example"
+if grep -Eq '^INTAKE_ELIGIBLE_COLLABORATORS=' "$root/.env.example"; then
+  printf '%s\n' '.env.example must not define operator-maintained approval identities' >&2
+  exit 1
+fi
+require '^minimum_repository_role = "triage"$' "$root/config/gitea-intake.toml"
+require '^repositories = \["admin/gascity-mail-fixture"\]$' "$root/config/gitea-intake.toml"
 require 'fresh disposable issue' "$root/README.md"
 require 'real Mayor/formula trace remains a separate Gate D requirement' "$root/README.md"
+require 'INTAKE_MANIFEST_PATH' "$root/README.md"
+require 'gitea-intake-doctor' "$root/README.md"
+require 'current non-City Gitea collaborator with `triage` or stronger' "$root/README.md"
+require 'Removing a repository from the manifest stops new intake after redeploy' "$root/README.md"
+require 'does not delete prior labels, webhooks, users, or ledger history' "$root/README.md"
 require 'machine plan marker must contain only revision and repository JSON fields' "$root/scripts/city-mail-wake.sh"
 require 'must appear only inside the standalone marker' "$root/scripts/city-mail-wake.sh"
 
 wake_tmp="$(mktemp -d)"
-trap 'rm -f "$rendered" "$bridge" "$mail" "$city"; rm -rf "$wake_tmp"' EXIT
+trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher"; rm -rf "$doctor_tmp" "$wake_tmp"' EXIT
 cat >"$wake_tmp/fake-gc" <<'EOF'
 #!/usr/bin/env sh
 printf '%s\n' "$*" >>"$CITY_MAIL_WAKE_TEST_LOG"
@@ -209,5 +257,178 @@ CITY_PATH=/city CITY_MAIL_SIGNAL_FILE="$wake_tmp/mayor.signal" \
   CITY_MAIL_WAKE_GC="$wake_tmp/fake-gc" CITY_MAIL_WAKE_TEST_LOG="$wake_tmp/log" \
   CITY_MAIL_WAKE_ONCE=true sh "$root/scripts/city-mail-wake.sh"
 require '^--city /city session nudge --delivery=wait-idle mayor You have authenticated tracker mail in Agent Mail\. Fetch it through the Mayor-only Agent Mail MCP binding; follow Superpowers and IDD planning; respond on the linked Gitea issue before internal ceremony\. When publishing an authenticated intake plan, the standalone gascity:intake-plan:v1 machine plan marker must contain only revision and repository JSON fields; its reserved literal must appear only inside the standalone marker; use a new revision after every amendment\.$' "$wake_tmp/log"
+
+cat >"$doctor_tmp/env" <<'EOF'
+STACK_USERNAME=admin
+GITEA_HTTP_PORT=3002
+GITEA_MAIL_BRIDGE_ADMIN_TOKEN=test-admin-token
+INTAKE_MANIFEST_PATH=./manifest.toml
+EOF
+cat >"$doctor_tmp/manifest.toml" <<'EOF'
+minimum_repository_role = "triage"
+repositories = ["admin/clean"]
+EOF
+cat >"$doctor_tmp/fake-curl" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+for url do :; done
+case "$url" in
+  */api/v1/user)
+    printf '%s\n' '{"login":"admin","is_admin":true}'
+    ;;
+  */api/v1/repos/admin/clean)
+    printf '%s\n' '{"private":true,"internal":false,"has_issues":true}'
+    ;;
+  */api/v1/repos/admin/clean/issues\?state=all\&limit=1)
+    printf '%s\n' '[]'
+    ;;
+  */api/v1/users/gascity-mcp-mayor|*/api/v1/users/gascity-mail-bridge|*/api/v1/users/gascity-mail-launcher)
+    exit 22
+    ;;
+  *)
+    printf 'unexpected curl url: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$doctor_tmp/fake-curl"
+doctor_env="$(
+  ENV_FILE="$doctor_tmp/env" CURL_BIN="$doctor_tmp/fake-curl" GITEA_API_ROOT='http://example.test/api/v1' \
+    sh "$root/scripts/gitea-intake-doctor.sh" --format env
+)"
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_ACCOUNT=gascity-mcp-mayor' >/dev/null
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_REPOSITORY_SCOPES=admin/clean' >/dev/null
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_CITY_IDENTITIES=gascity-mcp-mayor,gascity-mail-bridge,gascity-mail-launcher' >/dev/null
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_MINIMUM_REPOSITORY_ROLE=triage' >/dev/null
+
+cat >"$doctor_tmp/manifest.toml" <<'EOF'
+minimum_repository_role = "triage"
+repositories = ["admin/dirty"]
+EOF
+cat >"$doctor_tmp/fake-curl" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+for url do :; done
+case "$url" in
+  */api/v1/user)
+    printf '%s\n' '{"login":"admin","is_admin":true}'
+    ;;
+  */api/v1/repos/admin/dirty)
+    printf '%s\n' '{"private":true,"internal":false,"has_issues":true}'
+    ;;
+  */api/v1/repos/admin/dirty/issues\?state=all\&limit=1)
+    printf '%s\n' '[{"number":1}]'
+    ;;
+  */api/v1/users/gascity-mcp-mayor|*/api/v1/users/gascity-mail-bridge|*/api/v1/users/gascity-mail-launcher)
+    exit 22
+    ;;
+  *)
+    printf 'unexpected curl url: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$doctor_tmp/fake-curl"
+if ENV_FILE="$doctor_tmp/env" CURL_BIN="$doctor_tmp/fake-curl" GITEA_API_ROOT='http://example.test/api/v1' \
+  sh "$root/scripts/gitea-intake-doctor.sh" --format env >"$doctor_tmp/doctor.out" 2>"$doctor_tmp/doctor.err"; then
+  printf '%s\n' 'doctor must reject repositories with existing issue history' >&2
+  exit 1
+fi
+require 'must have no existing issues' "$doctor_tmp/doctor.err"
+
+cat >"$doctor_tmp/manifest.toml" <<'EOF'
+minimum_repository_role = "triage"
+repositories = ["admin/clean"]
+EOF
+cat >"$doctor_tmp/fake-curl" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+for url do :; done
+case "$url" in
+  */api/v1/user)
+    printf '%s\n' '{"login":"admin","is_admin":true}'
+    ;;
+  */api/v1/repos/admin/clean)
+    printf '%s\n' '{"private":true,"internal":false,"has_issues":true}'
+    ;;
+  */api/v1/repos/admin/clean/issues\?state=all\&limit=1)
+    printf '%s\n' '[]'
+    ;;
+  */api/v1/users/gascity-mcp-mayor)
+    exit 22
+    ;;
+  */api/v1/users/gascity-mail-bridge)
+    printf '%s\n' '{"login":"gascity-mail-bridge","restricted":false,"is_admin":false}'
+    ;;
+  */api/v1/users/gascity-mail-launcher)
+    exit 22
+    ;;
+  *)
+    printf 'unexpected curl url: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$doctor_tmp/fake-curl"
+if ENV_FILE="$doctor_tmp/env" CURL_BIN="$doctor_tmp/fake-curl" GITEA_API_ROOT='http://example.test/api/v1' \
+  sh "$root/scripts/gitea-intake-doctor.sh" --format env >"$doctor_tmp/doctor.out" 2>"$doctor_tmp/doctor.err"; then
+  printf '%s\n' 'doctor must reject misconfigured fixed role accounts' >&2
+  exit 1
+fi
+require 'must be restricted and non-admin' "$doctor_tmp/doctor.err"
+
+cat >"$doctor_tmp/manifest.toml" <<'EOF'
+minimum_repository_role = "triage"
+repositories = ["admin/keep","admin/remove"]
+EOF
+cat >"$doctor_tmp/fake-curl" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+for url do :; done
+printf 'GET %s\n' "$url" >>"$DOCTOR_LOG"
+case "$url" in
+  */api/v1/user)
+    printf '%s\n' '{"login":"admin","is_admin":true}'
+    ;;
+  */api/v1/repos/admin/keep|*/api/v1/repos/admin/remove)
+    printf '%s\n' '{"private":true,"internal":false,"has_issues":true}'
+    ;;
+  */api/v1/repos/admin/keep/issues\?state=all\&limit=1|*/api/v1/repos/admin/remove/issues\?state=all\&limit=1)
+    printf '%s\n' '[]'
+    ;;
+  */api/v1/users/gascity-mcp-mayor|*/api/v1/users/gascity-mail-bridge|*/api/v1/users/gascity-mail-launcher)
+    exit 22
+    ;;
+  *)
+    printf 'unexpected curl url: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$doctor_tmp/fake-curl"
+: >"$doctor_tmp/doctor.log"
+doctor_env="$(
+  DOCTOR_LOG="$doctor_tmp/doctor.log" ENV_FILE="$doctor_tmp/env" CURL_BIN="$doctor_tmp/fake-curl" GITEA_API_ROOT='http://example.test/api/v1' \
+    sh "$root/scripts/gitea-intake-doctor.sh" --format env
+)"
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_REPOSITORY_SCOPES=admin/keep,admin/remove' >/dev/null
+cat >"$doctor_tmp/manifest.toml" <<'EOF'
+minimum_repository_role = "triage"
+repositories = ["admin/keep"]
+EOF
+: >"$doctor_tmp/doctor.log"
+doctor_env="$(
+  DOCTOR_LOG="$doctor_tmp/doctor.log" ENV_FILE="$doctor_tmp/env" CURL_BIN="$doctor_tmp/fake-curl" GITEA_API_ROOT='http://example.test/api/v1' \
+    sh "$root/scripts/gitea-intake-doctor.sh" --format env
+)"
+printf '%s\n' "$doctor_env" | grep -Fx 'INTAKE_REPOSITORY_SCOPES=admin/keep' >/dev/null
+if printf '%s\n' "$doctor_env" | grep -Fq 'admin/remove'; then
+  printf '%s\n' 'doctor must drop removed repositories from derived INTAKE_REPOSITORY_SCOPES' >&2
+  exit 1
+fi
+if grep -Eq '^(DELETE|PATCH|POST) ' "$doctor_tmp/doctor.log"; then
+  printf '%s\n' 'doctor must remain read-only during manifest removal checks' >&2
+  exit 1
+fi
 
 printf '%s\n' 'PASS: private City mail issue ingress profile is configured'
