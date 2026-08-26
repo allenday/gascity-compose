@@ -147,6 +147,7 @@ require 'city-mail-secrets/launcher.env' "$root/scripts/gitea-mail-bridge-bootst
 require 'city-mail-wake' "$root/docker/city-entrypoint.sh"
 require 'city-mail-mcp-proxy' "$root/scripts/codex-mayor"
 require 'COPY scripts/city-mail-mcp-proxy.py /usr/local/bin/city-mail-mcp-proxy' "$root/Dockerfile.city"
+require 'bash ca-certificates curl git jq python3 tini' "$root/Dockerfile.city"
 require 'timeout --signal=TERM' "$root/scripts/city-mail-wake.sh"
 require 'collaborators/\$bridge_login' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'permission":"read' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
