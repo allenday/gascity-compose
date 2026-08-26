@@ -190,7 +190,16 @@ for identity in "$intake_account" "$bridge_login" "$launcher_login"; do
   fi
 done
 
-if [ -z "$(value_for GITEA_MAIL_BRIDGE_TOKEN)" ]; then
+token_belongs_to() {
+  token="$1"
+  login="$2"
+  [ -n "$token" ] && curl --fail --silent --show-error \
+    -H "Authorization: token $token" "$gitea_api/user" |
+    jq -e --arg login "$login" '.login == $login and .is_admin == false and .restricted == true' >/dev/null
+}
+
+bridge_gitea_token="$(value_for GITEA_MAIL_BRIDGE_TOKEN)"
+if ! token_belongs_to "$bridge_gitea_token" "$bridge_login"; then
   token="$(compose exec -T gitea gitea admin user generate-access-token \
     --username "$bridge_login" \
     --token-name gascity-mail-bridge \
