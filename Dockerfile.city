@@ -2,13 +2,14 @@
 # small, reproducible controller image from the upstream release source.
 FROM golang:1.26.6-bookworm AS build
 ARG GASCITY_REF=v1.3.4
-ARG BEADS_VERSION=v1.1.0
+ARG GASCITY_REPOSITORY=https://github.com/gastownhall/gascity.git
+ARG BEADS_VERSION=v1.2.2
 ARG CAGENT_REF=v1.23.0
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates git libicu-dev pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN git init gascity \
     && cd gascity \
-    && git remote add origin https://github.com/gastownhall/gascity.git \
+    && git remote add origin "${GASCITY_REPOSITORY}" \
     && git fetch --depth 1 origin "${GASCITY_REF}" \
     && git checkout --detach FETCH_HEAD \
     && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/gc ./cmd/gc \

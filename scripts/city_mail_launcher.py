@@ -10,6 +10,7 @@ import tempfile
 import subprocess
 import time
 import urllib.request
+from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
@@ -60,6 +61,12 @@ def binding_for(message: dict[str, object], run_id: str) -> dict[str, object]:
     }
 
 
+def binding_topic(authorization_id: str) -> str:
+    if not authorization_id:
+        raise ValueError("authorization_id")
+    return "gc-binding-" + sha256(authorization_id.encode("utf-8")).hexdigest()[:32]
+
+
 def request_for(message: dict[str, object]) -> dict[str, object]:
     validate_authorization(message)
     payload = message["payload"]
@@ -71,13 +78,13 @@ def inbox_arguments(project_key: str, agent_name: str, registration_token: str) 
     return {"project_key": project_key, "agent_name": agent_name, "registration_token": registration_token, "limit": 100, "include_bodies": True}
 
 
-def city_launch_command(request: dict[str, object], city_path: str) -> list[str]:
+def city_launch_command(request: dict[str, object], city_path: str, rig: str) -> list[str]:
     message = validate_authorization(request["message"])
     payload = message["payload"]
     assert isinstance(payload, dict)
     issue = payload["issue"]
     assert isinstance(issue, dict)
-    return ["gc", "--city", city_path, "sling", "mayor", f"Gitea intake authorization {payload['id']} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}", "--var", f"artifact_root={city_path}", "--on", "superpowers-build", "--json"]
+    return ["gc", "--city", city_path, "--rig", rig, "sling", "mayor", f"Gitea intake authorization {payload['id']} for {issue['repository']}#{issue['number']} at {payload['pinned_base']}", "--var", f"artifact_root={city_path}", "--on", "superpowers-build", "--scope-kind", "rig", "--scope-ref", rig, "--json"]
 
 
 def record_before_ack(ledger_path: str | Path, authorization_id: str, run_id: str, acknowledge: Callable[[], None]) -> tuple[str, bool]:
@@ -165,7 +172,7 @@ def city_worker() -> None:
                 request = json.loads(request_path.read_text())
                 if request.get("formula") != "superpowers-build" or request.get("target") != "mayor":
                     raise ValueError("unsupported City launch request")
-                launched = subprocess.run(city_launch_command(request, os.environ["CITY_PATH"]), check=True, text=True, capture_output=True, timeout=120)
+                launched = subprocess.run(city_launch_command(request, os.environ["CITY_PATH"], os.environ["CITY_MAIL_LAUNCHER_RIG"]), check=True, text=True, capture_output=True, timeout=120)
                 _write_json(response_path, {"run_id": json.loads(launched.stdout)["bead_id"]})
             except (KeyError, ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
                 _write_json(failure_path, {"error": type(error).__name__})
@@ -200,7 +207,7 @@ def serve() -> None:
                             continue
                         run_id = json.loads(response_path.read_text())["run_id"]
                     binding = binding_for(message, run_id)
-                    _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "send_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "sender_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "sender_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "to":[bridge], "subject":f"gc.run.binding.{auth_id}", "body_md":json.dumps(binding, separators=(",", ":")), "thread_id":message.get("thread_id"), "topic":f"gc-binding-{auth_id}", "ack_required":True})
+                    _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "send_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "sender_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "sender_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "to":[bridge], "subject":f"gc.run.binding.{auth_id}", "body_md":json.dumps(binding, separators=(",", ":")), "thread_id":message.get("thread_id"), "topic":binding_topic(auth_id), "ack_required":True})
                     record_before_ack(state, auth_id, run_id, lambda: _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "acknowledge_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "agent_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "registration_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "message_id":envelope["id"]}))
                 except (KeyError, ValueError, OSError, subprocess.CalledProcessError, json.JSONDecodeError):
                     continue

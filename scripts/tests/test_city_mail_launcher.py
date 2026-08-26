@@ -26,16 +26,28 @@ class LauncherProtocolTest(unittest.TestCase):
     def test_accepts_exact_authorization_and_builds_binding(self):
         self.assertEqual("auth-1", launcher.validate_authorization(MESSAGE)["payload"]["id"])
         self.assertEqual("bead-9", launcher.binding_for(MESSAGE, "bead-9")["payload"]["run_id"])
+        self.assertEqual("gc-binding-5548710825af9134ac625b7befad29fe", launcher.binding_topic("auth-1"))
 
     def test_builds_city_local_request(self):
         request = launcher.request_for(MESSAGE)
         self.assertEqual("auth-1", request["authorization_id"])
         self.assertEqual("superpowers-build", request["formula"])
 
-    def test_city_launch_command_supplies_required_artifact_root(self):
-        command = launcher.city_launch_command(launcher.request_for(MESSAGE), "/opt/gascity/my-city")
-        self.assertEqual(["--var", "artifact_root=/opt/gascity/my-city"], command[-5:-3])
-        self.assertEqual(["--on", "superpowers-build", "--json"], command[-3:])
+    def test_city_launch_command_supplies_configured_rig_and_artifact_root(self):
+        command = launcher.city_launch_command(launcher.request_for(MESSAGE), "/opt/gascity/my-city", "my-project")
+        self.assertEqual(["--rig", "my-project"], command[3:5])
+        self.assertEqual(["--var", "artifact_root=/opt/gascity/my-city"], command[-9:-7])
+        self.assertEqual(["--scope-kind", "rig", "--scope-ref", "my-project", "--json"], command[-5:])
+
+    def test_city_service_receives_local_worker_rig(self):
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        city_service = compose.split("  city:\n", 1)[1].split("\n  gitea:", 1)[0]
+        self.assertIn("CITY_MAIL_LAUNCHER_RIG:", city_service)
+
+    def test_launcher_uses_city_host_mapping_for_private_queue_compatibility(self):
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        launcher_service = compose.split("  city-mail-launcher:\n", 1)[1].split("\n  gascity-mcp:", 1)[0]
+        self.assertIn('user: "${HOST_UID:-1000}:${HOST_GID:-1000}"', launcher_service)
 
     def test_inbox_request_includes_message_bodies(self):
         self.assertEqual(
