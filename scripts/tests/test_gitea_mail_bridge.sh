@@ -116,6 +116,10 @@ require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-smoke.sh"
 require 'url "\$instance/\$repository/issues/\$issue_number"' "$root/scripts/gitea-mail-bridge-smoke.sh"
 require 'while \[ "\$attempts" -lt 90 \]; do' "$root/scripts/gitea-mail-bridge-smoke.sh"
+if [ "$(grep -Fc 'while [ "$attempts" -lt 90 ]; do' "$root/scripts/gitea-mail-bridge-smoke.sh")" -ne 3 ]; then
+  printf '%s\n' 'City mail smoke waits must cover webhook settlement, authorization, and binding recovery' >&2
+  exit 1
+fi
 require 'gitea admin user list' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '--must-change-password=false' "$root/scripts/bootstrap.sh"
 require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"

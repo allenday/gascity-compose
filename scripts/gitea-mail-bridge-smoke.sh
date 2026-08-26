@@ -98,7 +98,7 @@ wait_for_count() {
   thread="$3"
   wanted="$4"
   attempts=0
-  while [ "$attempts" -lt 30 ]; do
+  while [ "$attempts" -lt 90 ]; do
     inbox="$(fetch_inbox "$identity" "$token")"
     count="$(tracker_count "$inbox" "$thread")"
     if [ "$count" -eq "$wanted" ]; then
@@ -114,7 +114,7 @@ wait_for_count() {
 wait_for_authorization() {
   topic_prefix="$1"
   attempts=0
-  while [ "$attempts" -lt 30 ]; do
+  while [ "$attempts" -lt 90 ]; do
     inbox="$(fetch_inbox "$(require_value INTAKE_MAIL_LAUNCHER_IDENTITY)" "$(require_value MCP_AGENT_MAIL_LAUNCHER_REGISTRATION_TOKEN)")"
     authorization="$(printf '%s' "$inbox" | jq -cer --arg thread "$thread_id" --arg prefix "$topic_prefix" \
       '[.[] | select(.thread_id == $thread) | select(.subject | startswith($prefix)) | .body_md | fromjson] | first // empty' 2>/dev/null || true)"
