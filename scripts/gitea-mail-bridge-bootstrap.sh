@@ -87,6 +87,10 @@ for key in INTAKE_REPOSITORY_SCOPES INTAKE_CITY_IDENTITIES INTAKE_ELIGIBLE_COLLA
   require_value "$key" >/dev/null
 done
 
+# Stop any prior bridge before taking ownership of its durable ledger. Otherwise
+# an older root-run container can atomically replace the file during migration.
+compose --profile gitea-mail-bridge stop gitea-mail-bridge
+
 # The bridge always runs as the distroless non-root identity. Keeping its ledger
 # owned by that identity makes the fixture's read-only persistence check real.
 mkdir -p state/gitea-mail-bridge state/city-mail-secrets
