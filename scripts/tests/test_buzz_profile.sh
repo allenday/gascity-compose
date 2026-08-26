@@ -37,6 +37,10 @@ printf '%s\n' "$relay" | grep -Eq 'ghcr\.io/block/buzz:sha-[0-9a-f]{7,}@sha256:[
   printf '%s\n' 'buzz-relay image must use a published sha tag and immutable digest' >&2
   exit 1
 }
+printf '%s\n' "$relay" | grep -Eq 'BUZZ_REQUIRE_MEDIA_GET_AUTH: "?true"?' || {
+  printf '%s\n' 'buzz-relay must require media GET authentication' >&2
+  exit 1
+}
 require 'source: .*/state/buzz-git' "$rendered"
 require 'source: .*/state/buzz-postgres' "$rendered"
 require 'source: .*/state/buzz-redis' "$rendered"
