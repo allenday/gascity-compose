@@ -258,7 +258,9 @@ test -z "$ack_before"
 chmod 0700 state/gitea-mail-bridge
 compose --profile gitea-mail-bridge restart gitea-mail-bridge >/dev/null
 attempts=0
-while [ "$attempts" -lt 30 ]; do
+# Allow bridge startup plus two complete reconciliation intervals before
+# declaring record-before-ack recovery absent.
+while [ "$attempts" -lt 90 ]; do
   if jq -e --arg run "smoke-run-$issue_number" '[.records[].binding.run_id?] | index($run) != null' state/gitea-mail-bridge/ledger.json >/dev/null 2>&1; then
     ack_after="$(compose exec -T mcp-agent-mail python3 -c 'import sqlite3,sys; db=sqlite3.connect("storage.sqlite3"); row=db.execute("select ack_ts from message_recipients where message_id=?",(int(sys.argv[1]),)).fetchone(); print("" if row is None or row[0] is None else row[0])' "$binding_message_id")"
     if [ -n "$ack_after" ]; then

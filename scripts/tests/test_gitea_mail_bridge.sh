@@ -115,6 +115,7 @@ require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-bootstr
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'GITEA_MAIL_BRIDGE_ADMIN_TOKEN' "$root/scripts/gitea-mail-bridge-smoke.sh"
 require 'url "\$instance/\$repository/issues/\$issue_number"' "$root/scripts/gitea-mail-bridge-smoke.sh"
+require 'while \[ "\$attempts" -lt 90 \]; do' "$root/scripts/gitea-mail-bridge-smoke.sh"
 require 'gitea admin user list' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '--must-change-password=false' "$root/scripts/bootstrap.sh"
 require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
