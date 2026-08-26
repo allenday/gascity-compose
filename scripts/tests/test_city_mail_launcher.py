@@ -27,6 +27,11 @@ class LauncherProtocolTest(unittest.TestCase):
         self.assertEqual("auth-1", launcher.validate_authorization(MESSAGE)["payload"]["id"])
         self.assertEqual("bead-9", launcher.binding_for(MESSAGE, "bead-9")["payload"]["run_id"])
 
+    def test_builds_city_local_request(self):
+        request = launcher.request_for(MESSAGE)
+        self.assertEqual("auth-1", request["authorization_id"])
+        self.assertEqual("superpowers-build", request["formula"])
+
     def test_rejects_missing_immutable_base(self):
         with self.assertRaisesRegex(ValueError, "pinned_base"):
             invalid = {**MESSAGE, "payload": {key: value for key, value in MESSAGE["payload"].items() if key != "pinned_base"}}

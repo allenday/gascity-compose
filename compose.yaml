@@ -68,6 +68,8 @@ services:
       MCP_AGENT_MAIL_PROJECT_KEY: ${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}
       MCP_AGENT_MAIL_MAYOR_IDENTITY: ${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
       CITY_MAIL_WAKE_ENABLED: ${CITY_MAIL_WAKE_ENABLED:-true}
+      CITY_MAIL_LOCAL_LAUNCH_ENABLED: ${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}
+      CITY_MAIL_LAUNCHER_QUEUE: /var/lib/city-mail-launcher
       CITY_MAIL_SIGNAL_FILE: /var/lib/mcp-mail-signals/projects/${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}/agents/${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}.signal
       # Non-secret profile settings rendered into ephemeral CODEX_HOME.
       TAILNET_OLLAMA_BASE_URL: ${TAILNET_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -89,6 +91,7 @@ services:
       - ./codex:/run/secrets/codex-config:ro
       - ./state/city-mail-secrets:/run/secrets/city-mail:ro
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
+      - ./state/city-mail-launcher:/var/lib/city-mail-launcher
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
@@ -360,17 +363,12 @@ services:
         GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
-      CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /var/lib/gascity
       CITY_MAIL_LAUNCHER_SECRET_FILE: /run/secrets/city-mail/launcher.env
       CITY_MAIL_LAUNCHER_STATE: /var/lib/city-mail-launcher/ledger.json
+      CITY_MAIL_LAUNCHER_QUEUE: /var/lib/city-mail-launcher
       CITY_MAIL_LAUNCHER_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
       CITY_MAIL_LAUNCHER_MAIL_URL: http://mcp-agent-mail:8765/mcp
     volumes:
-      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
-      - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
-      - ./state/gc-runtime:/var/lib/gascity
       - ./state/city-mail-secrets/launcher.env:/run/secrets/city-mail/launcher.env:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
     depends_on:
