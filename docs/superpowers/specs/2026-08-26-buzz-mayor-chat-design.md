@@ -89,7 +89,7 @@ event produces no second logical Mayor delivery.
 
 Outbound polling reads only the bridge's Agent Mail identity. A valid structured
 Mayor reply identifies the mapped inbound conversation. The bridge records the
-outbox intent before `buzz messages send --reply-to <root-event>` and marks it
+complete signed raw-event outbox intent before its first publish and marks it
 complete only after a durable successful result. Duplicate mail receipts or a
 restart must not create duplicate Buzz replies.
 
