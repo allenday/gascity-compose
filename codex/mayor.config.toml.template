@@ -1,0 +1,10 @@
+# Generated into ephemeral CODEX_HOME by city-entrypoint.
+# This profile keeps Mayor-only control surfaces separate from the shared
+# Codex configuration while using the mounted ChatGPT Codex authentication.
+model = "gpt-5.4"
+
+[mcp_servers.agent_mail]
+url = "http://127.0.0.1:8767/mcp"
+
+[mcp_servers.gitea]
+url = "http://gitea-mcp-mayor:8080/mcp"

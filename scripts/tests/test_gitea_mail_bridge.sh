@@ -101,22 +101,28 @@ require 'GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server,gitea-ma
 require 'GASCITY_GITEA_REF: a4b8cb704e4681a6eaeedb1b94a3d5d53238bcdf' "$rendered"
 require 'git status --porcelain --untracked-files=all' "$rendered"
 
-# Mayor gets Agent Mail through its role-specific Runpod Codex profile. The
-# shared Codex configuration deliberately contains no Agent Mail endpoint.
-require '^\[mcp_servers\.agent_mail\]$' "$root/codex/runpod.config.toml.template"
-require 'url = "http://127.0.0.1:8767/mcp"' "$root/codex/runpod.config.toml.template"
-if grep -Eq 'bearer_token_env_var|REGISTRATION_TOKEN' "$root/codex/runpod.config.toml.template"; then
+# Mayor gets Agent Mail through its role-specific Codex profile. The shared
+# Codex configuration deliberately contains no Agent Mail endpoint.
+require '^\[mcp_servers\.agent_mail\]$' "$root/codex/mayor.config.toml.template"
+require 'url = "http://127.0.0.1:8767/mcp"' "$root/codex/mayor.config.toml.template"
+if grep -Eq 'bearer_token_env_var|REGISTRATION_TOKEN' "$root/codex/mayor.config.toml.template"; then
   printf '%s\n' 'Codex must not receive Agent Mail credentials; the Mayor-only proxy injects them' >&2
   exit 1
 fi
-require '^\[mcp_servers\.gitea\]$' "$root/codex/runpod.config.toml.template"
-require 'url = "http://gitea-mcp-mayor:8080/mcp"' "$root/codex/runpod.config.toml.template"
+require '^\[mcp_servers\.gitea\]$' "$root/codex/mayor.config.toml.template"
+require 'url = "http://gitea-mcp-mayor:8080/mcp"' "$root/codex/mayor.config.toml.template"
+require '^model = "gpt-5\.4"$' "$root/codex/mayor.config.toml.template"
+if grep -Eq '^model_provider\s*=' "$root/codex/mayor.config.toml.template"; then
+  printf '%s\n' 'Mayor Codex profile must use the authenticated default provider' >&2
+  exit 1
+fi
 if grep -Eq '^\[mcp_servers\.agent_mail\]$' "$root/codex/config.toml.template"; then
   printf '%s\n' 'Agent Mail MCP must not be configured in the shared Codex profile' >&2
   exit 1
 fi
 require 'command = "/usr/local/bin/codex-mayor"' "$root/config/city-cost-safe.toml"
 require 'resume_command = "/usr/local/bin/codex-mayor resume \{\{.SessionKey\}\}"' "$root/config/city-cost-safe.toml"
+require 'args_append = \["--profile", "mayor"\]' "$root/config/city-cost-safe.toml"
 require '^\[providers\.codex-mayor-runpod\]$' "$root/config/city-cost-safe.toml"
 require '^provider = "codex-mayor-runpod"$' "$root/config/city-cost-safe.toml"
 if grep -Eq 'MCP_AGENT_MAIL_(BEARER|MAYOR_REGISTRATION)_TOKEN' "$root/config/city-cost-safe.toml"; then
