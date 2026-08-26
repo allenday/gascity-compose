@@ -15,6 +15,7 @@ options_schema = [{ key = "model", omit = true }]
 [providers.codex-mayor-runpod]
 base = "builtin:codex"
 command = "/usr/local/bin/codex-mayor"
+resume_command = "/usr/local/bin/codex-mayor resume {{.SessionKey}}"
 ready_delay_ms = 0
 args_append = ["--profile", "runpod"]
 options_schema_merge = "by_key"

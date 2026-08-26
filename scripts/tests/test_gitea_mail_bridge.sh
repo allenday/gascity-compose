@@ -116,6 +116,7 @@ if grep -Eq '^\[mcp_servers\.agent_mail\]$' "$root/codex/config.toml.template"; 
   exit 1
 fi
 require 'command = "/usr/local/bin/codex-mayor"' "$root/config/city-cost-safe.toml"
+require 'resume_command = "/usr/local/bin/codex-mayor resume \{\{.SessionKey\}\}"' "$root/config/city-cost-safe.toml"
 require '^\[providers\.codex-mayor-runpod\]$' "$root/config/city-cost-safe.toml"
 require '^provider = "codex-mayor-runpod"$' "$root/config/city-cost-safe.toml"
 if grep -Eq 'MCP_AGENT_MAIL_(BEARER|MAYOR_REGISTRATION)_TOKEN' "$root/config/city-cost-safe.toml"; then
@@ -157,6 +158,7 @@ require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap
 require 'city-mail-secrets/launcher.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'city-mail-wake' "$root/docker/city-entrypoint.sh"
 require 'city-mail-mcp-proxy' "$root/scripts/codex-mayor"
+require '/usr/local/bin/codex "\$@" </dev/tty &' "$root/scripts/codex-mayor"
 require 'COPY scripts/city-mail-mcp-proxy.py /usr/local/bin/city-mail-mcp-proxy' "$root/Dockerfile.city"
 require 'bash ca-certificates curl git jq python3 tini' "$root/Dockerfile.city"
 require 'timeout --signal=TERM' "$root/scripts/city-mail-wake.sh"
