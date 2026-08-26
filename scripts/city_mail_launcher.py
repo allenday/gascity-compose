@@ -78,6 +78,10 @@ def inbox_arguments(project_key: str, agent_name: str, registration_token: str) 
     return {"project_key": project_key, "agent_name": agent_name, "registration_token": registration_token, "limit": 100, "include_bodies": True}
 
 
+def authorization_error(authorization_id: str, error: Exception) -> str:
+    return f"city-mail-launcher: authorization {authorization_id}: {type(error).__name__}"
+
+
 def city_launch_command(request: dict[str, object], city_path: str, rig: str) -> list[str]:
     message = validate_authorization(request["message"])
     payload = message["payload"]
@@ -191,6 +195,7 @@ def serve() -> None:
             for envelope in inbox if isinstance(inbox, list) else []:
                 if not str(envelope.get("subject", "")).startswith("gc.intake.start-authorized."):
                     continue
+                auth_id = "unknown"
                 try:
                     message = validate_authorization(json.loads(envelope["body_md"]))
                     payload = message["payload"]
@@ -209,7 +214,8 @@ def serve() -> None:
                     binding = binding_for(message, run_id)
                     _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "send_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "sender_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "sender_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "to":[bridge], "subject":f"gc.run.binding.{auth_id}", "body_md":json.dumps(binding, separators=(",", ":")), "thread_id":message.get("thread_id"), "topic":binding_topic(auth_id), "ack_required":True})
                     record_before_ack(state, auth_id, run_id, lambda: _rpc(url, secret["MCP_AGENT_MAIL_BEARER_TOKEN"], "acknowledge_message", {"project_key":secret["MCP_AGENT_MAIL_PROJECT_KEY"], "agent_name":secret["MCP_AGENT_MAIL_AGENT_NAME"], "registration_token":secret["MCP_AGENT_MAIL_REGISTRATION_TOKEN"], "message_id":envelope["id"]}))
-                except (KeyError, ValueError, OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+                except (KeyError, ValueError, OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+                    print(authorization_error(auth_id, error), flush=True)
                     continue
         except (OSError, ValueError, json.JSONDecodeError):
             pass

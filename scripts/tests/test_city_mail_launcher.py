@@ -61,6 +61,12 @@ class LauncherProtocolTest(unittest.TestCase):
             launcher.inbox_arguments("project", "gas-city-launcher", "registration"),
         )
 
+    def test_reports_authorization_processing_errors_without_payloads(self):
+        self.assertEqual(
+            "city-mail-launcher: authorization auth-1: ValueError",
+            launcher.authorization_error("auth-1", ValueError("secret-bearing detail")),
+        )
+
     def test_rejects_missing_immutable_base(self):
         with self.assertRaisesRegex(ValueError, "pinned_base"):
             invalid = {**MESSAGE, "payload": {key: value for key, value in MESSAGE["payload"].items() if key != "pinned_base"}}
