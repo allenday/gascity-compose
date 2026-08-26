@@ -98,7 +98,7 @@ fi
 # pin must be the immutable Task 4 merge.
 require 'GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server,gitea-mail-bridge' "$rendered"
 require 'GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server,gitea-mail-bridge' "$rendered"
-require 'GASCITY_GITEA_REF: a4b8cb704e4681a6eaeedb1b94a3d5d53238bcdf' "$rendered"
+require 'GASCITY_GITEA_REF: 6a2c96f51f51464d7820756d8becae044cdad3eb' "$rendered"
 require 'git status --porcelain --untracked-files=all' "$rendered"
 
 # Mayor gets Agent Mail through its role-specific Codex profile. The shared
