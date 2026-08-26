@@ -85,6 +85,10 @@ require '^  city-mail-launcher:$' "$launcher"
 require 'target: /run/secrets/city-mail/launcher.env' "$launcher"
 require 'read_only: true' "$launcher"
 require 'target: /var/lib/city-mail-launcher' "$launcher"
+if [ "$(grep -Fc 'GASCITY_SOURCE_DIR' "$root/compose.yaml")" -ne 2 ]; then
+  printf '%s\n' 'City launcher must mount the Gas City source required by imported formulas' >&2
+  exit 1
+fi
 if grep -Eq '^    ports:|GITEA_|GASCITY_API_URL|MCP_AGENT_MAIL_MAYOR|CODEX_AUTH_FILE' "$launcher"; then
   printf '%s\n' 'City launcher must not receive public, Gitea, Mayor, or City API authority' >&2
   exit 1

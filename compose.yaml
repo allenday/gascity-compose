@@ -369,6 +369,7 @@ services:
     volumes:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
+      - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
       - ./state/gc-runtime:/var/lib/gascity
       - ./state/city-mail-secrets/launcher.env:/run/secrets/city-mail/launcher.env:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
