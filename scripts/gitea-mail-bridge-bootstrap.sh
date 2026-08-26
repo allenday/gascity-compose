@@ -312,7 +312,12 @@ umask 077
 chmod 0600 "$launcher_secret_tmp"
 mv "$launcher_secret_tmp" "$launcher_secret"
 mkdir -p state/city-mail-launcher
-chown -R "${HOST_UID:-1000}:${HOST_GID:-1000}" state/city-mail-launcher
+launcher_uid="$(value_for HOST_UID)"; launcher_uid="${launcher_uid:-1000}"
+launcher_gid="$(value_for HOST_GID)"; launcher_gid="${launcher_gid:-1000}"
+case "$launcher_uid:$launcher_gid" in
+  *[!0-9:]* | :* | *:) printf '%s\n' 'ERROR: HOST_UID and HOST_GID must be numeric when set' >&2; exit 1 ;;
+esac
+chown -R "$launcher_uid:$launcher_gid" state/city-mail-launcher
 chmod 0700 state/city-mail-launcher
 
 chmod 600 "$env_file"

@@ -129,6 +129,9 @@ done
 python3 -c 'import pathlib,sys; path=pathlib.Path(sys.argv[1]); compile(path.read_text(), str(path), "exec")' "$root/scripts/city-mail-mcp-proxy.py"
 require 'MCP_AGENT_MAIL_PROJECT_PATH' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'chown -R 65532:65532 state/gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'launcher_uid="\$\(value_for HOST_UID\)"' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'launcher_gid="\$\(value_for HOST_GID\)"' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'chown -R "\$launcher_uid:\$launcher_gid" state/city-mail-launcher' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 bridge_stop_line="$(grep -n 'stop gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 ledger_chown_line="$(grep -n 'chown -R 65532:65532 state/gitea-mail-bridge' "$root/scripts/gitea-mail-bridge-bootstrap.sh" | head -n 1 | cut -d: -f1)"
 if [ -z "$bridge_stop_line" ] || [ "$bridge_stop_line" -ge "$ledger_chown_line" ]; then
