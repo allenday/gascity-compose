@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap up down smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -38,6 +38,9 @@ gitea-mail-bridge-bootstrap:
 
 gitea-mail-bridge-up: gitea-mail-bridge-bootstrap
 	$(COMPOSE) --profile mcp --profile gitea-mcp --profile gitea-mail-bridge up -d --build --wait --wait-timeout 120 gitea-mcp-mayor gitea-mail-bridge
+
+gitea-mail-launcher-up: gitea-mail-bridge-bootstrap
+	$(COMPOSE) --profile mcp --profile gitea-mail-bridge up -d --build --wait --wait-timeout 180 gitea-mail-bridge city-mail-launcher
 
 gitea-mail-bridge-smoke:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mail-bridge-smoke.sh

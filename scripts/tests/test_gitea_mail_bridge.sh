@@ -6,7 +6,8 @@ rendered="$(mktemp)"
 bridge="$(mktemp)"
 mail="$(mktemp)"
 city="$(mktemp)"
-trap 'rm -f "$rendered" "$bridge" "$mail" "$city"' EXIT
+launcher="$(mktemp)"
+trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher"' EXIT
 
 # The bridge profile is operationally self-contained: callers must not need to
 # know or enable Agent Mail's implementation profile separately.
@@ -40,6 +41,7 @@ require() {
 service_block gitea-mail-bridge "$bridge"
 service_block mcp-agent-mail "$mail"
 service_block city "$city"
+service_block city-mail-launcher "$launcher"
 
 # The intake bridge is a private, independently stateful process with only
 # read-side Gitea and authenticated Agent Mail capabilities.
@@ -75,6 +77,16 @@ require 'MCP_AGENT_MAIL_PROJECT_KEY:' "$city"
 require 'CITY_MAIL_SIGNAL_FILE:' "$city"
 if grep -Eq 'MCP_AGENT_MAIL_BEARER_TOKEN:|MCP_AGENT_MAIL_MAYOR_REGISTRATION_TOKEN:' "$city"; then
   printf '%s\n' 'Mayor Mail secrets must not enter the City supervisor ambient environment' >&2
+  exit 1
+fi
+
+# The launcher is a private, least-privilege consumer of start authorizations.
+require '^  city-mail-launcher:$' "$launcher"
+require 'target: /run/secrets/city-mail/launcher.env' "$launcher"
+require 'read_only: true' "$launcher"
+require 'target: /var/lib/city-mail-launcher' "$launcher"
+if grep -Eq '^    ports:|GITEA_|GASCITY_API_URL|MCP_AGENT_MAIL_MAYOR|CODEX_AUTH_FILE' "$launcher"; then
+  printf '%s\n' 'City launcher must not receive public, Gitea, Mayor, or City API authority' >&2
   exit 1
 fi
 
@@ -131,6 +143,7 @@ fi
 require 'gitea admin user list' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '--must-change-password=false' "$root/scripts/bootstrap.sh"
 require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'city-mail-secrets/launcher.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'city-mail-wake' "$root/docker/city-entrypoint.sh"
 require 'city-mail-mcp-proxy' "$root/scripts/codex-mayor"
 require 'COPY scripts/city-mail-mcp-proxy.py /usr/local/bin/city-mail-mcp-proxy' "$root/Dockerfile.city"
@@ -142,6 +155,7 @@ require 'permission":"write' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '^gitea-mail-bridge-bootstrap:' "$root/Makefile"
 require '^gitea-mail-bridge-up:' "$root/Makefile"
 require '^gitea-mail-bridge-smoke:' "$root/Makefile"
+require '^gitea-mail-launcher-up:' "$root/Makefile"
 
 wake_tmp="$(mktemp -d)"
 trap 'rm -f "$rendered" "$bridge" "$mail" "$city"; rm -rf "$wake_tmp"' EXIT

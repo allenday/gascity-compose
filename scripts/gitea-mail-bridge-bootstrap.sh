@@ -300,5 +300,20 @@ umask 077
 chmod 0600 "$mayor_secret_tmp"
 mv "$mayor_secret_tmp" "$mayor_secret"
 
+launcher_secret="state/city-mail-secrets/launcher.env"
+launcher_secret_tmp="$(mktemp "${launcher_secret}.tmp.XXXXXX")"
+umask 077
+{
+  printf 'MCP_AGENT_MAIL_BEARER_TOKEN=%s\n' "$(require_value MCP_AGENT_MAIL_BEARER_TOKEN)"
+  printf 'MCP_AGENT_MAIL_REGISTRATION_TOKEN=%s\n' "$launcher_token"
+  printf 'MCP_AGENT_MAIL_PROJECT_KEY=%s\n' "$project_key"
+  printf 'MCP_AGENT_MAIL_AGENT_NAME=%s\n' "$launcher_identity"
+} >"$launcher_secret_tmp"
+chmod 0600 "$launcher_secret_tmp"
+mv "$launcher_secret_tmp" "$launcher_secret"
+mkdir -p state/city-mail-launcher
+chown -R "${HOST_UID:-1000}:${HOST_GID:-1000}" state/city-mail-launcher
+chmod 0700 state/city-mail-launcher
+
 chmod 600 "$env_file"
 printf '%s\n' 'PASS: City mail bridge identities, contacts, labels, and signed webhooks are reconciled'

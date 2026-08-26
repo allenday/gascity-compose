@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+: "${CITY_MAIL_LAUNCHER_SECRET_FILE:?CITY_MAIL_LAUNCHER_SECRET_FILE must be set}"
+: "${CITY_MAIL_LAUNCHER_STATE:?CITY_MAIL_LAUNCHER_STATE must be set}"
+test -r "$CITY_MAIL_LAUNCHER_SECRET_FILE"
+mkdir -p "$(dirname "$CITY_MAIL_LAUNCHER_STATE")"
+touch "$CITY_MAIL_LAUNCHER_STATE"
+chmod 0600 "$CITY_MAIL_LAUNCHER_STATE"
+exec tail -f /dev/null
