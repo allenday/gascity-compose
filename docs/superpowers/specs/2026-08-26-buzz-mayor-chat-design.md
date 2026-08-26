@@ -93,9 +93,19 @@ outbox intent before `buzz messages send --reply-to <root-event>` and marks it
 complete only after a durable successful result. Duplicate mail receipts or a
 restart must not create duplicate Buzz replies.
 
-The initial adapter uses polling rather than raw Nostr WebSockets because the
-supported Buzz CLI provides stable JSON reads/writes but no durable subscribe
-cursor. Poll interval and bounded batch size are explicit configuration.
+The initial adapter uses bounded polling rather than raw Nostr WebSockets
+because the supported Buzz CLI provides no durable subscribe cursor. The
+persisted inbound cursor is the ordered pair `(created_at, event_id)`, not a
+timestamp alone: a saturated page at one timestamp is resumed by event ID
+without skipping or permanently stalling same-timestamp events.
+
+The bridge may use the Buzz CLI for bounded reads, but it does not use the CLI
+for outbound replies. It constructs one signed Nostr event with a stable
+logical reply ID in its tags and posts that exact event through Buzz's pinned
+raw event API. The durable outbox saves the complete signed event before its
+first POST; a timeout or restart retries the identical event ID, rather than
+creating another human-visible reply. This is a narrow provider adapter, not a
+generic Nostr client or WebSocket consumer.
 
 Inbound messages fail closed when the event is not in the configured channel,
 the signer is not allowlisted, the content is malformed for the bridge envelope,

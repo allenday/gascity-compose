@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - Use exactly one configured private Buzz channel and allowlisted human public keys.
-- Persist logical Buzz event IDs separately from polling receipts and advance the cursor only after durable recording.
+- Persist logical Buzz event IDs separately from polling receipts and advance the ordered `(created_at,event_id)` cursor only after durable recording.
+- Save a complete signed raw Buzz reply event before its first POST and retry the identical event ID after a timeout or restart; do not use a non-idempotent CLI send for outbound replies.
 - Relay generic message content unchanged; neither repository receives a Gitea token, URL, API client, issue type, or lifecycle behavior for this feature.
 - The bridge has no City API, City runtime mount, host port, or Mayor private key.
 - Pin the published Buzz image and `gascity-gitea` source revision immutably; never use a floating tag or branch.
@@ -44,10 +45,10 @@ Tasks 1 and 2 are independent. Task 3 is their fan-in and must obtain an interfa
 - Modify: `go.mod` only if an existing standard-library/client dependency cannot provide the required bounded Buzz command execution.
 
 **Interfaces:**
-- Consumes: `BuzzClient.Messages(ctx, channel string, since time.Time, limit int) ([]BuzzEvent, error)` and `BuzzClient.Send(ctx, channel, content, replyTo string) (BuzzReceipt, error)`.
+- Consumes: `BuzzClient.Messages(ctx, channel string, cursor Cursor, limit int) ([]BuzzEvent, error)` and `BuzzClient.Publish(ctx, event SignedEvent) error`.
 - Consumes: `MailClient.Receive(ctx, identity string, cursor string, limit int) ([]MailMessage, error)`, `MailClient.Send(ctx, envelope MayorEnvelope) (string, error)`, and `MailClient.Acknowledge(ctx, identity, messageID string) error`.
 - Produces: `Controller.Reconcile(ctx context.Context) error`; it has no tracker or City interfaces.
-- Produces: JSON ledger records `InboundRecord{BuzzEventID, ChannelID, ThreadRootID, MailMessageID}` and `OutboundRecord{MailMessageID, BuzzEventID}`.
+- Produces: JSON ledger records `InboundRecord{BuzzEventID, ChannelID, ThreadRootID, MailMessageID}` and `OutboundRecord{MailMessageID, SignedEvent, BuzzEventID}` plus `Cursor{CreatedAt,EventID}`.
 
 - [ ] **Step 1: Write failing ledger and controller tests.**
 
@@ -66,6 +67,12 @@ func TestReconcileRestartsWithoutDuplicatingOutboundReply(t *testing.T) {
     require.NoError(t, controller.Reconcile(context.Background()))
     require.Len(t, controller.buzz.sent, 1)
 }
+
+func TestReconcileSameTimestampPageResumesByEventID(t *testing.T) {
+    controller := newSaturatedTimestampController(t, "evt-2")
+    require.NoError(t, controller.Reconcile(context.Background()))
+    require.Equal(t, Cursor{CreatedAt: 1700000000, EventID: "evt-3"}, controller.Cursor())
+}
 ```
 
 - [ ] **Step 2: Run the focused Go test package and confirm the missing package/API fails.**
@@ -76,7 +83,7 @@ Expected: FAIL because `buzzbridge` and command configuration do not yet exist.
 
 - [ ] **Step 3: Implement the smallest durable adapter.**
 
-Implement a file-atomic JSON ledger with separate inbound/outbound records and a persisted bounded polling cursor. Filter before delivery on the fixed channel and exact allowlisted signer. Write the inbound record before Agent Mail send; write outbound intent before Buzz send; complete each record only after the corresponding side effect succeeds. Use a typed `gc.buzz.mayor.message.v1` envelope that contains a mapping key and opaque content. Reject unmapped, malformed, wrong-channel, and wrong-signer inputs without acknowledgement.
+Implement a file-atomic JSON ledger with separate inbound/outbound records and a persisted bounded `(created_at,event_id)` polling cursor. Filter before delivery on the fixed channel and exact allowlisted signer. Write the inbound record before Agent Mail send. For outbound mail, construct a deterministic signed raw Buzz event with the logical mail-receipt ID in a dedicated tag, persist its complete bytes before the first POST, and retry that identical event after an uncertain outcome. Complete each record only after the corresponding side effect succeeds. Use a typed `gc.buzz.mayor.message.v1` envelope that contains a mapping key and opaque content. Reject unmapped, malformed, wrong-channel, and wrong-signer inputs without acknowledgement.
 
 - [ ] **Step 4: Add command configuration and health behavior.**
 
