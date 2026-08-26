@@ -6,7 +6,8 @@ value() { awk -F= -v key="$1" '$1 == key { value = substr($0, length(key) + 2) }
 required() { result="$(value "$1")"; test -n "$result"; printf '%s' "$result"; }
 compose() { docker compose --env-file "$env_file" "$@"; }
 admin="$(required STACK_USERNAME)"; token="$(required GITEA_MAIL_BRIDGE_ADMIN_TOKEN)"
-repository="$admin/$(required GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"; port="$(value GITEA_HTTP_PORT)"; port="${port:-3002}"; api="http://127.0.0.1:${port}/api/v1"; issue_number=""
+repository="$admin/$(required GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"; gitea_port="$(value GITEA_HTTP_PORT)"; gitea_port="${gitea_port:-3002}"; api="http://gitea:3000/api/v1"; issue_number=""
+curl() { command curl --connect-to "gitea:3000:127.0.0.1:${gitea_port}" "$@"; }
 cleanup() { if [ -n "$issue_number" ]; then curl --silent --user "$admin:$token" -H 'Content-Type: application/json' -X PATCH "$api/repos/$repository/issues/$issue_number" --data '{"state":"closed"}' >/dev/null || true; fi; }
 trap cleanup EXIT
 if [ "${CITY_MAIL_LAUNCHER_SMOKE_SKIP_UP:-false}" != true ]; then

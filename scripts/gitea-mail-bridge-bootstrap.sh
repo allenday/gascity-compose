@@ -118,7 +118,13 @@ if [ -z "$admin_password" ] || [ "$admin_token_version" != 2 ]; then
 fi
 gitea_port="$(value_for GITEA_HTTP_PORT)"
 gitea_port="${gitea_port:-3002}"
-gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
+# Keep Gitea's generated issue URLs canonical for the private bridge.  The
+# operator reaches the published host port, while --connect-to preserves the
+# internal Host authority that Gitea serializes into signed webhook payloads.
+gitea_api="http://gitea:3000/api/v1"
+curl() {
+  command curl --connect-to "gitea:3000:127.0.0.1:${gitea_port}" "$@"
+}
 
 intake_account="$(require_value INTAKE_ACCOUNT)"
 bridge_login="gas-city-mail-bridge"

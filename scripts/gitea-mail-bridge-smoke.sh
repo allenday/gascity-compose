@@ -133,7 +133,12 @@ admin="$(require_value STACK_USERNAME)"
 admin_password="$(require_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN)"
 gitea_port="$(value_for GITEA_HTTP_PORT)"
 gitea_port="${gitea_port:-3002}"
-gitea_api="http://127.0.0.1:${gitea_port}/api/v1"
+# Route through the host-published port without changing the Host authority
+# embedded in signed Gitea webhook payloads.
+gitea_api="http://gitea:3000/api/v1"
+curl() {
+  command curl --connect-to "gitea:3000:127.0.0.1:${gitea_port}" "$@"
+}
 fixture_repo="$(require_value GITEA_MAIL_BRIDGE_FIXTURE_REPOSITORY)"
 repository="$admin/$fixture_repo"
 if ! printf '%s' "$(require_value INTAKE_REPOSITORY_SCOPES)" | tr ',' '\n' | grep -Fxq "$repository"; then
