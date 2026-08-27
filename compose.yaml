@@ -389,7 +389,7 @@ services:
       BUZZ_S3_ACCESS_KEY: ${BUZZ_S3_ACCESS_KEY:?Set BUZZ_S3_ACCESS_KEY in .env}
       BUZZ_S3_SECRET_KEY: ${BUZZ_S3_SECRET_KEY:?Set BUZZ_S3_SECRET_KEY in .env}
       BUZZ_S3_BUCKET: ${BUZZ_S3_BUCKET:-buzz-media}
-    entrypoint: >
+    entrypoint: |
       /bin/sh -euc '
       mc alias set local http://buzz-minio:9000 "$$BUZZ_S3_ACCESS_KEY" "$$BUZZ_S3_SECRET_KEY"
       mc mb --ignore-existing "local/$$BUZZ_S3_BUCKET"
