@@ -329,7 +329,8 @@ services:
 
   buzz-postgres:
     profiles: [buzz]
-    image: postgres:17-alpine
+    # Keep the readable release tag while pinning the multi-architecture manifest.
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_DB: ${BUZZ_POSTGRES_DB:-buzz}
       POSTGRES_USER: ${BUZZ_POSTGRES_USER:-buzz}
@@ -347,7 +348,7 @@ services:
 
   buzz-redis:
     profiles: [buzz]
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${BUZZ_REDIS_PASSWORD:?Set BUZZ_REDIS_PASSWORD in .env}"]
     environment:
       REDIS_PASSWORD: ${BUZZ_REDIS_PASSWORD:?Set BUZZ_REDIS_PASSWORD in .env}
@@ -363,7 +364,7 @@ services:
 
   buzz-minio:
     profiles: [buzz]
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${BUZZ_S3_ACCESS_KEY:?Set BUZZ_S3_ACCESS_KEY in .env}
@@ -380,7 +381,7 @@ services:
 
   buzz-minio-init:
     profiles: [buzz]
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     depends_on:
       buzz-minio:
         condition: service_healthy
