@@ -335,6 +335,53 @@ This foundation provides only the private relay and its durable upstream
 dependencies. It does not deploy a Mayor bridge, bootstrap channel membership,
 connect to Agent Mail, or receive Gitea or City credentials.
 
+### Private Buzz Mayor bridge
+
+`buzz-mayor-bridge` is a separate, non-root Compose profile for one configured
+private Buzz channel. It has no host port, Gitea token, City endpoint, City
+runtime mount, Codex configuration, or Mayor private key. Its only persistent
+mount is `state/buzz-mayor-bridge/ledger.json`; the core bridge owns the
+replay-safe mapping between Buzz event IDs and Agent Mail messages.
+
+The service deliberately uses two different relay coordinates. Human clients
+keep using the canonical Tailnet `BUZZ_RELAY_URL` (`ws://` or `wss://`), which
+the bridge supplies to the core as `BUZZ_PUBLIC_RELAY_URL` for canonical Host
+preservation. The bridge's transport itself is fixed to the private
+`BUZZ_MAYOR_BRIDGE_RELAY_URL=http://buzz-relay:3000`; it never publishes that
+internal name. Its Docker health check calls `/readyz`, which becomes healthy
+only after the core has completed its initial authenticated relay query.
+
+Before enabling the profile, set `GASCITY_GITEA_REF` to the full immutable
+merged `gascity-gitea` revision that includes `cmd/buzz-mayor-bridge` and its
+dual-coordinate Host handling. The preflight refuses a dirty checkout, a
+non-full SHA, or a checkout at a different revision. Do not use a branch or
+floating tag. This pin is intentionally not set by the relay foundation.
+
+The dedicated bootstrap uses upstream `buzz-admin` only to generate the
+bridge's persistent Nostr keypair and reconcile relay membership. It uses the
+operator-installed upstream `buzz` CLI—configured as `BUZZ_CLI`—with the
+separate `BUZZ_CHANNEL_ADMIN_PRIVATE_KEY` to create or verify the fixed private
+channel and its human and bridge memberships. It also creates only the distinct
+Agent Mail bridge identity and its contact grants with the existing Mayor
+identity. It never creates Gitea users, tokens, labels, webhooks, repositories,
+or City work.
+
+After copying `.env.example` to ignored `.env`, set the listed Buzz keys,
+`BUZZ_ALLOWED_HUMAN_PUBKEYS`, and the existing Mayor Agent Mail registration
+token, then run:
+
+```bash
+make buzz-mayor-bridge-bootstrap ENV_FILE=.env
+make buzz-mayor-bridge-up ENV_FILE=.env
+```
+
+The second command runs strict configuration/source preflight and starts the
+relay, private Agent Mail service, and bridge with `--wait`. It additionally
+checks `/readyz`, proving the core's authenticated private query was issued
+with the canonical external Host. Live bidirectional acceptance and replay
+evidence are intentionally provided by the separate Buzz Mayor fixture, not by
+this deployment target.
+
 ### Tracker-to-City mail intake
 
 The `gitea-mail-bridge` profile is the independent ingress companion to the
