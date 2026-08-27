@@ -28,9 +28,22 @@ jobs:
           GITEA_MAYOR_TOKEN: ci-mayor-token
           GITEA_OBSERVER_TOKEN: ci-observer-token
           GITEA_WITNESS_TOKEN: ci-witness-token
+          BUZZ_RELAY_URL: ws://100.64.0.1:3003
+          BUZZ_MEDIA_BASE_URL: http://100.64.0.1:3003/media
+          BUZZ_MEDIA_SERVER_DOMAIN: 100.64.0.1:3003
+          BUZZ_CORS_ORIGINS: http://100.64.0.1:3003
+          BUZZ_RELAY_PRIVATE_KEY: ci-only-not-a-private-key
+          BUZZ_RELAY_OWNER_PUBKEY: 0000000000000000000000000000000000000000000000000000000000000000
+          BUZZ_GIT_HOOK_HMAC_SECRET: ci-only-not-a-hmac-secret
+          BUZZ_POSTGRES_PASSWORD: ci-only-not-a-postgres-password
+          BUZZ_REDIS_PASSWORD: ci-only-not-a-redis-password
+          BUZZ_S3_ACCESS_KEY: ci-buzz-access-key
+          BUZZ_S3_SECRET_KEY: ci-only-not-an-s3-secret
         run: |
           docker compose config --quiet
-          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge --profile buzz config --quiet
+      - name: Validate private Buzz relay contract
+        run: sh scripts/tests/test_buzz_profile.sh
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses
