@@ -398,7 +398,7 @@ services:
     restart: "no"
 
   mcp-agent-mail:
-    profiles: [mcp, gitea-mail-bridge]
+    profiles: [mcp, gitea-mail-bridge, buzz-mayor-bridge]
     build:
       context: .
       dockerfile: Dockerfile.mcp-agent-mail
@@ -423,6 +423,74 @@ services:
       interval: 15s
       timeout: 5s
       retries: 8
+
+  # One private Buzz channel -> Mayor Agent Mail adapter. It deliberately has
+  # no tracker, City, Codex, or Mayor credentials and owns only its replay
+  # ledger. The source checkout must already be the pinned, clean revision.
+  buzz-mayor-bridge:
+    profiles: [buzz-mayor-bridge]
+    user: "65532:65532"
+    build:
+      context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
+      args:
+        # #48 must merge before this is given its immutable bridge-core pin.
+        # The preflight rejects anything except a full resolved object ID.
+        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:?Set GASCITY_GITEA_REF in .env}
+      dockerfile_inline: |
+        FROM golang:1.24-alpine AS build
+        ARG GASCITY_GITEA_REF
+        RUN apk add --no-cache git busybox-static
+        WORKDIR /src
+        COPY go.mod ./
+        RUN go mod download
+        COPY . .
+        RUN test -z "$$(git status --porcelain --untracked-files=all)" \
+            && test "$$(git rev-parse HEAD)" = "$${GASCITY_GITEA_REF}" \
+            && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/buzz-mayor-bridge ./cmd/buzz-mayor-bridge
+        FROM gcr.io/distroless/static-debian12:nonroot
+        COPY --from=build /out/buzz-mayor-bridge /buzz-mayor-bridge
+        COPY --from=build /bin/busybox /busybox
+        USER nonroot:nonroot
+        ENTRYPOINT ["/buzz-mayor-bridge"]
+    environment:
+      BUZZ_MAYOR_BRIDGE_ADDR: :8080
+      # The core's raw-event client requires HTTP(S), so this is the private
+      # Compose coordinate rather than the human-facing ws(s) relay URL.
+      BUZZ_RELAY_URL: http://buzz-relay:3000
+      BUZZ_PUBLIC_RELAY_URL: ${BUZZ_RELAY_URL:?Set BUZZ_RELAY_URL in .env}
+      BUZZ_MAYOR_CHANNEL_ID: ${BUZZ_MAYOR_CHANNEL_ID:-}
+      BUZZ_ALLOWED_HUMAN_PUBKEYS: ${BUZZ_ALLOWED_HUMAN_PUBKEYS:-}
+      BUZZ_BRIDGE_PRIVATE_KEY: ${BUZZ_BRIDGE_PRIVATE_KEY:-}
+      BUZZ_LEDGER_PATH: /var/lib/buzz-mayor-bridge/ledger.json
+      BUZZ_POLL_INTERVAL_SECONDS: ${BUZZ_POLL_INTERVAL_SECONDS:-15}
+      BUZZ_BATCH_SIZE: ${BUZZ_BATCH_SIZE:-100}
+      BUZZ_OVERLAP_SECONDS: ${BUZZ_OVERLAP_SECONDS:-60}
+      BUZZ_READY_MAX_AGE_SECONDS: ${BUZZ_READY_MAX_AGE_SECONDS:-60}
+      BUZZ_AGENT_MAIL_URL: http://mcp-agent-mail:8765/mcp
+      BUZZ_AGENT_MAIL_HTTP_BEARER_TOKEN: ${MCP_AGENT_MAIL_BEARER_TOKEN:-}
+      BUZZ_AGENT_MAIL_SENDER_TOKEN: ${BUZZ_AGENT_MAIL_BRIDGE_REGISTRATION_TOKEN:-}
+      BUZZ_AGENT_MAIL_REGISTRATION_TOKEN: ${BUZZ_AGENT_MAIL_BRIDGE_REGISTRATION_TOKEN:-}
+      BUZZ_AGENT_MAIL_PROJECT_KEY: ${MCP_AGENT_MAIL_PROJECT_KEY:-bootstrap-required}
+      BUZZ_AGENT_MAIL_BRIDGE_IDENTITY: ${BUZZ_AGENT_MAIL_BRIDGE_IDENTITY:-buzz-mayor-bridge}
+      BUZZ_AGENT_MAIL_MAYOR_IDENTITY: ${BUZZ_AGENT_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
+    volumes:
+      - ./state/buzz-mayor-bridge:/var/lib/buzz-mayor-bridge
+    depends_on:
+      buzz-relay:
+        condition: service_healthy
+      mcp-agent-mail:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
 
   # Tracker-to-City intake is a separate private process from the status-only
   # gitea-bridge. It has no City API, issue-write, or run-mutation credential.

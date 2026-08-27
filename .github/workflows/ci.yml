@@ -41,9 +41,11 @@ jobs:
           BUZZ_S3_SECRET_KEY: ci-only-not-an-s3-secret
         run: |
           docker compose config --quiet
-          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge --profile buzz config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge --profile buzz --profile buzz-mayor-bridge config --quiet
       - name: Validate private Buzz relay contract
         run: sh scripts/tests/test_buzz_profile.sh
+      - name: Validate isolated Buzz Mayor bridge contract
+        run: sh scripts/tests/test_buzz_mayor_bridge.sh
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses
@@ -53,3 +55,5 @@ jobs:
           sh -n scripts/gitea-mcp-bootstrap.sh
           sh -n scripts/gitea-mcp-smoke.sh
           sh -n scripts/gitea-bridge-bootstrap.sh
+          sh -n scripts/buzz-mayor-bridge-bootstrap.sh
+          sh -n scripts/buzz-mayor-bridge-preflight.sh

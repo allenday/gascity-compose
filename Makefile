@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke buzz-up gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap up down smoke buzz-up buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight buzz-mayor-bridge-up buzz-mayor-bridge-smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -20,6 +20,21 @@ smoke:
 
 buzz-up:
 	$(COMPOSE) --profile buzz up -d --wait --wait-timeout 120
+
+buzz-mayor-bridge-bootstrap:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/buzz-mayor-bridge-bootstrap.sh
+
+buzz-mayor-bridge-preflight:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/buzz-mayor-bridge-preflight.sh
+
+buzz-mayor-bridge-up: buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight
+
+# Live acceptance belongs to the separate #34 fixture. Keep this explicit
+# target so automation has a stable handoff without pretending static checks
+# are end-to-end evidence.
+buzz-mayor-bridge-smoke:
+	@printf '%s\n' 'Buzz Mayor live smoke is intentionally supplied by the #34 acceptance fixture.' >&2
+	@exit 2
 
 gitea-mcp-up:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/gitea-mcp-preflight.sh
@@ -74,6 +89,7 @@ woodpecker-acceptance:
 
 test:
 	sh ./scripts/tests/test_buzz_profile.sh
+	sh ./scripts/tests/test_buzz_mayor_bridge.sh
 	sh ./scripts/tests/test_woodpecker_fixture.sh
 	sh ./scripts/tests/test_gitea_mail_bridge.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py
