@@ -106,7 +106,7 @@ if [ -z "$bearer" ] || [ "$bearer" = bootstrap-required ]; then
   bearer="$(openssl rand -hex 32)"
   set_value MCP_AGENT_MAIL_BEARER_TOKEN "$bearer"
 fi
-compose --profile buzz-mayor-bridge up -d --wait --wait-timeout 90 mcp-agent-mail
+compose --profile buzz --profile buzz-mayor-bridge up -d --wait --wait-timeout 90 mcp-agent-mail
 mcp_call() {
   tool="$1"
   arguments="$2"
