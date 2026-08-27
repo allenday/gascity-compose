@@ -27,12 +27,16 @@
 | Task | Repository | Files | Depends on | Produces |
 | --- | --- | --- | --- | --- |
 | 1. Bridge core | `cyberstorm-dev/gascity-gitea` | new `buzzbridge/`, `cmd/buzz-mayor-bridge/` | none | durable bidirectional adapter and tests |
+| 1a. Public-host core amendment | `cyberstorm-dev/gascity-gitea` | `buzzbridge/`, command tests | 1 | canonical public Host authority over private relay transport |
 | 2. Relay foundation | `allenday/gascity-compose` | `compose.yaml`, `nginx/nginx.conf`, `.env.example`, test | none | pinned Tailnet-only Buzz relay profile |
-| 3. Bridge deployment | `allenday/gascity-compose` | `compose.yaml`, `Makefile`, bootstrap/up scripts, test, CI | 1, 2 | isolated deployed bridge profile |
+| 3. Bridge deployment | `allenday/gascity-compose` | `compose.yaml`, `Makefile`, bootstrap/up scripts, test, CI | 1, 1a, 2 | isolated deployed bridge profile |
 | 4. Live fixture | `allenday/gascity-compose` | smoke script, Makefile, README, test | 3 | repeatable end-to-end evidence |
 | 5. Parent integration | both repositories | issue/PR evidence only | 1–4 | independently reviewed assembled delivery |
 
-Tasks 1 and 2 are independent. Task 3 is their fan-in and must obtain an interface-completeness review before its PR. Tasks 4 and 5 are sequential acceptance work.
+Tasks 1 and 2 are independent. Task 1a is a focused core amendment required
+to preserve Buzz's canonical public community Host over private transport.
+Task 3 is their fan-in and must obtain an interface-completeness review before
+its PR. Tasks 4 and 5 are sequential acceptance work.
 
 ### Task 1: Buzz Mayor bridge core
 
@@ -102,6 +106,41 @@ git add buzzbridge cmd/buzz-mayor-bridge go.mod go.sum
 git commit -m "feat: add durable Buzz Mayor mail bridge"
 ```
 
+### Task 1a: Canonical public relay-host core amendment
+
+**Repository:** `cyberstorm-dev/gascity-gitea`
+
+**Files:**
+- Modify: `buzzbridge/buzz.go`, `buzzbridge/buzz_test.go`, `cmd/buzz-mayor-bridge/main.go`, `cmd/buzz-mayor-bridge/main_test.go`
+
+**Interfaces:**
+- Consumes: private `BUZZ_RELAY_URL` transport endpoint and canonical external `BUZZ_PUBLIC_RELAY_URL`.
+- Produces: every raw query/event HTTP request targets the private endpoint while carrying the canonical public URL host authority; no caller controls that header.
+
+- [ ] **Step 1: Write failing transport-host tests.**
+
+Assert an HTTP test server receives its private destination while the request
+Host equals the canonical public authority. Assert missing/malformed public
+coordinate fails command configuration and an inbound message cannot affect the
+Host header.
+
+- [ ] **Step 2: Implement strict dual-coordinate configuration.**
+
+Parse both absolute HTTP(S) URLs, reject credentials/query/fragments, retain
+the public host authority separately, and set it only in the Buzz client
+transport. Keep NIP-98 signing bound to the actual request URL; do not use
+arbitrary user-supplied Host data.
+
+- [ ] **Step 3: Add authenticated preflight and verify.**
+
+Expose a bounded authenticated query operation usable by Compose preflight.
+Run `go test ./... -race -count=1` and `go vet ./...`, then commit:
+
+```bash
+git add buzzbridge cmd/buzz-mayor-bridge
+git commit -m "fix: preserve Buzz public relay host authority"
+```
+
 ### Task 2: Pinned Tailnet-only Buzz relay foundation
 
 **Repository:** `allenday/gascity-compose`
@@ -155,7 +194,7 @@ git commit -m "feat: add pinned private Buzz relay profile"
 - Create: `scripts/buzz-mayor-bridge-bootstrap.sh`, `scripts/buzz-mayor-bridge-preflight.sh`, `scripts/tests/test_buzz_mayor_bridge.sh`
 
 **Interfaces:**
-- Consumes: Task 1 command `./cmd/buzz-mayor-bridge` at an immutable `GASCITY_GITEA_REF` and Task 2 healthy `buzz-relay`.
+- Consumes: Task 1a command `./cmd/buzz-mayor-bridge` at an immutable `GASCITY_GITEA_REF`, `BUZZ_PUBLIC_RELAY_URL`, and private `BUZZ_RELAY_URL`, plus Task 2 healthy `buzz-relay`.
 - Produces: profile `buzz-mayor-bridge` and commands `make buzz-mayor-bridge-bootstrap`, `make buzz-mayor-bridge-up`, and `make buzz-mayor-bridge-smoke`.
 
 - [ ] **Step 1: Obtain an independent interface-completeness review before writing the PR.**
@@ -164,7 +203,7 @@ Review the actual Task 1 commit and resolved Buzz image/CLI contract. Record tha
 
 - [ ] **Step 2: Write the failing deployment contract test.**
 
-Assert the bridge has `profiles: [buzz-mayor-bridge]`, no `ports`, a sole bridge ledger mount, dependencies on healthy `buzz-relay` and `mcp-agent-mail`, and no `GITEA_`, `GASCITY_`, City mount, or Mayor private-key environment. Assert the build checks a clean pinned `gascity-gitea` checkout and builds only `./cmd/buzz-mayor-bridge`.
+Assert the bridge has `profiles: [buzz-mayor-bridge]`, no `ports`, a sole bridge ledger mount, dependencies on healthy `buzz-relay` and `mcp-agent-mail`, and no `GITEA_`, `GASCITY_`, City mount, or Mayor private-key environment. Assert the build checks a clean pinned `gascity-gitea` checkout and builds only `./cmd/buzz-mayor-bridge`. Assert private transport and canonical public Host are distinct explicit configuration values and a local `/readyz` probe is the Compose health check.
 
 - [ ] **Step 3: Run the test and confirm it fails.**
 
@@ -174,7 +213,7 @@ Expected: FAIL because the bridge profile and bootstrap are absent.
 
 - [ ] **Step 4: Implement deployment, bootstrap, and preflight.**
 
-Add the non-root bridge service and `mcp-agent-mail` profile membership. Bootstrap uses only Buzz administration/CLI credentials to create-or-verify the configured private channel and memberships, generates a bridge key once, stores it in ignored state/config, and writes stable public/channel coordinates. Preflight rejects unset coordinates, duplicate human keys, floating provider pins, or missing Agent Mail identity. It must not create a Gitea account, token, label, webhook, repository, or City work.
+Add the non-root bridge service and `mcp-agent-mail` profile membership. Map a private internal relay destination into `BUZZ_RELAY_URL` and canonical Tailnet community URL into `BUZZ_PUBLIC_RELAY_URL`; the core sets only the latter as HTTP Host authority. Bootstrap uses only Buzz administration/CLI credentials to create-or-verify the configured private channel and memberships, generates a bridge key once, stores it in ignored state/config, and writes stable public/channel coordinates. Preflight rejects unset coordinates, malformed or duplicate human public keys, a failed authenticated internal `/query` with the canonical Host, floating provider pins, or missing Agent Mail identity. It must not create a Gitea account, token, label, webhook, repository, or City work.
 
 - [ ] **Step 5: Wire command targets and CI.**
 
