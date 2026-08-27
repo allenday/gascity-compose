@@ -4,6 +4,24 @@ A host-mounted Docker Compose deployment for a Gas City installation and its ope
 dependencies: Ollama, OpenTelemetry Collector, Prometheus, Loki, Grafana, Gatus, node exporter,
 Gitea, and optional MCP services.
 
+## Generic foundation pin
+
+This repository is the deployment-policy overlay. It pins the reusable
+`cyberstorm-dev/gascity-compose` foundation as the `upstream/gascity-compose`
+submodule at immutable revision
+`2bfbf2a1a502491031702d483286782bd16382af`. Refresh it deliberately:
+
+```bash
+git submodule update --init --recursive
+git -C upstream/gascity-compose checkout <reviewed-full-sha>
+```
+
+The foundation owns generic runtime, edge, observability, Agent Mail, and the
+`gascity-private-mail` adapter contract. This overlay owns Gitea intake,
+Woodpecker, City policy, staging fixtures, and acceptance workflows. Buzz is a
+sibling deployment that consumes the adapter contract; it is not an Allenday
+submodule.
+
 It is a deployment kit, not an official Gas City distribution. Gas City currently has no general
 purpose published container image, so the `city` profile builds a small controller image from the
 upstream tagged source. The City mount and its state are never copied into an image.

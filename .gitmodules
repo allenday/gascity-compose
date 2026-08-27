@@ -1,0 +1,3 @@
+[submodule "upstream/gascity-compose"]
+	path = upstream/gascity-compose
+	url = git@github.com:cyberstorm-dev/gascity-compose.git
