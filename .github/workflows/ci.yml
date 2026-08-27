@@ -53,3 +53,5 @@ jobs:
           sh -n scripts/gitea-mcp-bootstrap.sh
           sh -n scripts/gitea-mcp-smoke.sh
           sh -n scripts/gitea-bridge-bootstrap.sh
+      - name: Run structural tests
+        run: make test

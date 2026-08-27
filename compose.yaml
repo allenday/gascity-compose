@@ -424,8 +424,6 @@ services:
       timeout: 5s
       retries: 8
 
-  # Tracker-to-City intake is a separate private process from the status-only
-  # gitea-bridge. It has no City API, issue-write, or run-mutation credential.
   gitea-mail-bridge:
     profiles: [gitea-mail-bridge]
     # Keep the bridge unprivileged even when the host operator uses UID 0.
@@ -474,6 +472,8 @@ services:
       INTAKE_MAIL_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
       INTAKE_MAIL_MAYOR_IDENTITY: ${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
       INTAKE_MAIL_LAUNCHER_IDENTITY: ${INTAKE_MAIL_LAUNCHER_IDENTITY:-gas-city-launcher}
+      INTAKE_PERMISSION_READER_URL: http://gitea-intake-permission-reader:8080/v1/repository-role
+      INTAKE_PERMISSION_READER_BEARER_TOKEN: ${GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN:-}
     volumes:
       - ./state/gitea-mail-bridge:/var/lib/gitea-mail-bridge
     depends_on:
@@ -481,6 +481,39 @@ services:
         condition: service_healthy
       mcp-agent-mail:
         condition: service_healthy
+      gitea-intake-permission-reader:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gitea-intake-permission-reader:
+    profiles: [gitea-mail-bridge]
+    image: python:3.13-alpine
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - python3
+      - /usr/local/bin/gitea-intake-permission-reader.py
+    environment:
+      GITEA_URL: http://gitea:3000
+      INTAKE_REPOSITORY_SCOPES: ${INTAKE_REPOSITORY_SCOPES:-}
+      GITEA_INTAKE_PERMISSION_READER_SECRET_FILE: /run/secrets/city-mail/permission-reader.env
+    volumes:
+      - ./scripts/gitea-intake-permission-reader.py:/usr/local/bin/gitea-intake-permission-reader.py:ro
+      - ./state/city-mail-secrets/permission-reader.env:/run/secrets/city-mail/permission-reader.env:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    depends_on:
+      gitea:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/liveness')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
     restart: unless-stopped
 
   # The launcher consumes bridge-issued authorizations and can start only the
