@@ -37,9 +37,12 @@ its Git storage). Persist every upstream state directory below `./state`.
 
 Nginx remains the only Tailnet-facing listener. It publishes a configurable
 `BUZZ_PORT` and proxies WebSocket and HTTP traffic to the relay. The relay has
-no direct host port. Human clients use one canonical Tailnet `BUZZ_RELAY_URL`;
-the bridge uses a distinct internal relay URL only where Buzz's community-host
-contract permits it.
+no direct host port. Human clients use the canonical Tailnet
+`BUZZ_PUBLIC_RELAY_URL`. The bridge transports requests to the private
+`BUZZ_RELAY_URL` (normally `http://buzz-relay:3000`) but sends the canonical
+public Host authority from `BUZZ_PUBLIC_RELAY_URL` on every relay request.
+This preserves one Buzz community without relying on container-to-host
+hairpin routing.
 
 Add a separate `buzz-mayor-bridge` profile. Its service has a dedicated durable
 ledger mount, no published port, no mounted City runtime, and no Gitea or City
@@ -71,6 +74,15 @@ The Mayor's Buzz private key is not required in this slice: the bridge signs
 its transport messages with its own narrowly scoped key and labels the content
 as a Mayor relay. The bridge never impersonates a human or receives broad
 Mayor/City credentials.
+
+The bridge command requires both relay coordinates. It validates that the
+public coordinate is an absolute HTTP(S) URL with no credentials, query, or
+fragment, and extracts its host authority. The internal coordinate has the
+same URL restrictions and is used only as the TCP/TLS destination. The Host
+authority is not accepted from chat content, Agent Mail, or an inbound event.
+At bootstrap/preflight, an authenticated internal `/query` request made with
+the canonical public Host authority must succeed before the steady-state
+bridge starts.
 
 ## Bridge protocol and durability
 
@@ -136,6 +148,12 @@ City, host-port, or runtime-mount access.
 Bridge unit tests prove channel/signer rejection, exactly-once logical inbound
 delivery across duplicate polling, exactly-once outbound reply across duplicate
 mail receipts, and cursor/outbox recovery after a restart.
+
+The deployed service exposes `/healthz` and `/readyz`; its container image
+includes only the minimal local probe required for Compose to check `/readyz`.
+Readiness requires a successful bounded reconciliation and expires after the
+configured stale age. Deployment tests assert this health check as well as the
+absence of every disallowed authority.
 
 Live acceptance uses an allowlisted human identity and the configured private
 channel to demonstrate:
