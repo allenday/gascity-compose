@@ -27,6 +27,7 @@ relay=$(service_block buzz-relay)
 postgres=$(service_block buzz-postgres)
 redis=$(service_block buzz-redis)
 object_store=$(service_block buzz-minio)
+object_store_client=$(service_block buzz-minio-init)
 
 [ -n "$relay" ] || { printf '%s\n' 'missing buzz-relay service' >&2; exit 1; }
 if printf '%s\n' "$relay" | grep -Eq '^    ports:$'; then
@@ -53,10 +54,18 @@ printf '%s\n' "$relay" | grep -Fq '/_liveness' || {
   printf '%s\n' 'buzz-relay liveness healthcheck is required' >&2
   exit 1
 }
-[ -n "$postgres" ] && [ -n "$redis" ] && [ -n "$object_store" ] || {
+[ -n "$postgres" ] && [ -n "$redis" ] && [ -n "$object_store" ] && [ -n "$object_store_client" ] || {
   printf '%s\n' 'Buzz durable dependency services are required' >&2
   exit 1
 }
+
+for service in buzz-postgres buzz-redis buzz-minio buzz-minio-init; do
+  block=$(service_block "$service")
+  if ! printf '%s\n' "$block" | grep -Eq 'image: .+@sha256:[0-9a-f]{64}$'; then
+    printf '%s\n' "$service image must use an immutable digest" >&2
+    exit 1
+  fi
+done
 
 require '^  buzz-relay:$' "$root/compose.yaml"
 for service in buzz-relay buzz-postgres buzz-redis buzz-minio buzz-minio-init; do
