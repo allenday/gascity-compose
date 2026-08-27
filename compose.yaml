@@ -433,8 +433,8 @@ services:
     build:
       context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
       args:
-        # #48 must merge before this is given its immutable bridge-core pin.
-        # The preflight rejects anything except a full resolved object ID.
+        # .env.example pins the merged dual-coordinate bridge core. Preflight
+        # also rejects anything except a clean checkout at this full object ID.
         GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:?Set GASCITY_GITEA_REF in .env}
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
@@ -456,8 +456,8 @@ services:
       BUZZ_MAYOR_BRIDGE_ADDR: :8080
       # The core's raw-event client requires HTTP(S), so this is the private
       # Compose coordinate rather than the human-facing ws(s) relay URL.
-      BUZZ_RELAY_URL: http://buzz-relay:3000
-      BUZZ_PUBLIC_RELAY_URL: ${BUZZ_RELAY_URL:?Set BUZZ_RELAY_URL in .env}
+      BUZZ_RELAY_URL: ${BUZZ_MAYOR_BRIDGE_RELAY_URL:?Set BUZZ_MAYOR_BRIDGE_RELAY_URL in .env}
+      BUZZ_PUBLIC_RELAY_URL: ${BUZZ_PUBLIC_RELAY_URL:?Set BUZZ_PUBLIC_RELAY_URL in .env}
       BUZZ_MAYOR_CHANNEL_ID: ${BUZZ_MAYOR_CHANNEL_ID:-}
       BUZZ_ALLOWED_HUMAN_PUBKEYS: ${BUZZ_ALLOWED_HUMAN_PUBKEYS:-}
       BUZZ_BRIDGE_PRIVATE_KEY: ${BUZZ_BRIDGE_PRIVATE_KEY:-}
