@@ -26,6 +26,13 @@ class PermissionReaderTest(unittest.TestCase):
     def setUp(self):
         self.reader = load_reader()
 
+    def test_bootstrap_grants_reader_uid_access_to_its_private_secret(self):
+        bootstrap = (ROOT / "scripts" / "gitea-mail-bridge-bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            'chown 65532:65532 "$permission_reader_secret_tmp"',
+            bootstrap,
+        )
+
     def test_load_binding_requires_pat_and_bearer(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "permission-reader.env"

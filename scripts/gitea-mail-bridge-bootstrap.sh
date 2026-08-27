@@ -396,6 +396,10 @@ umask 077
   printf 'GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN=%s\n' "$(require_value GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN)"
 } >"$permission_reader_secret_tmp"
 chmod 0600 "$permission_reader_secret_tmp"
+# The private reader runs as the distroless non-root UID.  Transfer ownership
+# before the atomic replace so its read-only file mount remains private yet
+# usable by that service.
+chown 65532:65532 "$permission_reader_secret_tmp"
 mv "$permission_reader_secret_tmp" "$permission_reader_secret"
 
 mkdir -p state/city-mail-launcher
