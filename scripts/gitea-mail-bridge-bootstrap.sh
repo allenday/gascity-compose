@@ -76,7 +76,7 @@ random_secret() {
   openssl rand -hex 32
 }
 
-for key in MCP_AGENT_MAIL_BEARER_TOKEN GITEA_MAIL_BRIDGE_WEBHOOK_SECRET; do
+for key in MCP_AGENT_MAIL_BEARER_TOKEN GITEA_MAIL_BRIDGE_WEBHOOK_SECRET GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN; do
   current="$(value_for "$key")"
   if [ -z "$current" ] || [ "$current" = bootstrap-required ]; then
     set_value "$key" "$(random_secret)"
@@ -138,6 +138,25 @@ if [ -z "$admin_password" ] || [ "$admin_token_version" != 2 ]; then
   test -n "$admin_password"
   set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN "$admin_password"
   set_value GITEA_MAIL_BRIDGE_ADMIN_TOKEN_VERSION 2
+fi
+
+token_login() {
+  token="$1"
+  [ -n "$token" ] && curl --fail --silent --show-error \
+    -H "Authorization: token $token" "$gitea_api/user" | jq -er '.login'
+}
+
+permission_reader_token="$(value_for GITEA_INTAKE_PERMISSION_READER_TOKEN)"
+permission_reader_version="$(value_for GITEA_INTAKE_PERMISSION_READER_TOKEN_VERSION)"
+if [ -z "$permission_reader_token" ] || [ "$permission_reader_version" != 1 ] || [ "$(token_login "$permission_reader_token" 2>/dev/null || true)" != "$admin" ]; then
+  permission_reader_token="$(compose exec -T gitea gitea admin user generate-access-token \
+    --username "$admin" \
+    --token-name gascity-intake-permission-reader-v1 \
+    --scopes 'read:user,read:repository' \
+    --raw)"
+  test -n "$permission_reader_token"
+  set_value GITEA_INTAKE_PERMISSION_READER_TOKEN "$permission_reader_token"
+  set_value GITEA_INTAKE_PERMISSION_READER_TOKEN_VERSION 1
 fi
 
 # The disposable default fixture is the only repository bootstrap may create.
@@ -368,6 +387,17 @@ umask 077
 } >"$launcher_secret_tmp"
 chmod 0600 "$launcher_secret_tmp"
 mv "$launcher_secret_tmp" "$launcher_secret"
+
+permission_reader_secret="state/city-mail-secrets/permission-reader.env"
+permission_reader_secret_tmp="$(mktemp "${permission_reader_secret}.tmp.XXXXXX")"
+umask 077
+{
+  printf 'GITEA_INTAKE_PERMISSION_READER_TOKEN=%s\n' "$(require_value GITEA_INTAKE_PERMISSION_READER_TOKEN)"
+  printf 'GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN=%s\n' "$(require_value GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN)"
+} >"$permission_reader_secret_tmp"
+chmod 0600 "$permission_reader_secret_tmp"
+mv "$permission_reader_secret_tmp" "$permission_reader_secret"
+
 mkdir -p state/city-mail-launcher
 launcher_uid="$(value_for HOST_UID)"; launcher_uid="${launcher_uid:-1000}"
 launcher_gid="$(value_for HOST_GID)"; launcher_gid="${launcher_gid:-1000}"

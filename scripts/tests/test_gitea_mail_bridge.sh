@@ -7,8 +7,9 @@ bridge="$(mktemp)"
 mail="$(mktemp)"
 city="$(mktemp)"
 launcher="$(mktemp)"
+permission_reader="$(mktemp)"
 doctor_tmp="$(mktemp -d)"
-trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher"; rm -rf "$doctor_tmp"' EXIT
+trap 'rm -f "$rendered" "$bridge" "$mail" "$city" "$launcher" "$permission_reader"; rm -rf "$doctor_tmp"' EXIT
 
 # The bridge profile is operationally self-contained: callers must not need to
 # know or enable Agent Mail's implementation profile separately.
@@ -43,6 +44,7 @@ service_block gitea-mail-bridge "$bridge"
 service_block mcp-agent-mail "$mail"
 service_block city "$city"
 service_block city-mail-launcher "$launcher"
+service_block gitea-intake-permission-reader "$permission_reader"
 
 # The intake bridge is a private, independently stateful process with only
 # read-side Gitea and authenticated Agent Mail capabilities.
@@ -53,15 +55,18 @@ require 'target: /var/lib/gitea-mail-bridge' "$bridge"
 require 'INTAKE_LEDGER_PATH: /var/lib/gitea-mail-bridge/ledger.json' "$bridge"
 require 'GITEA_URL: http://gitea:3000' "$bridge"
 require 'INTAKE_MAIL_URL: http://mcp-agent-mail:8765/mcp' "$bridge"
+require 'INTAKE_PERMISSION_READER_URL: http://gitea-intake-permission-reader:8080/v1/repos' "$bridge"
+require 'INTAKE_PERMISSION_READER_BEARER_TOKEN:' "$bridge"
 require 'gitea:' "$bridge"
 require 'condition: service_healthy' "$bridge"
 require 'mcp-agent-mail:' "$bridge"
+require 'gitea-intake-permission-reader:' "$bridge"
 require 'INTAKE_MINIMUM_REPOSITORY_ROLE: triage' "$bridge"
 if grep -Eq '^    ports:' "$bridge"; then
   printf '%s\n' 'gitea-mail-bridge must not publish a host port' >&2
   exit 1
 fi
-if grep -Eq 'GASCITY_API_URL|GASCITY_RUN_ID|GITEA_ISSUE_URL' "$bridge"; then
+if grep -Eq 'GASCITY_API_URL|GASCITY_RUN_ID|GITEA_ISSUE_URL|GITEA_MAIL_BRIDGE_ADMIN_TOKEN|GITEA_INTAKE_PERMISSION_READER_TOKEN' "$bridge"; then
   printf '%s\n' 'gitea-mail-bridge must not receive City mutation or status-bridge bindings' >&2
   exit 1
 fi
@@ -97,6 +102,21 @@ if [ "$(grep -Fc 'GASCITY_SOURCE_DIR' "$root/compose.yaml")" -ne 1 ]; then
 fi
 if grep -Eq '^    ports:|GITEA_|GASCITY_API_URL|MCP_AGENT_MAIL_MAYOR|CODEX_AUTH_FILE' "$launcher"; then
   printf '%s\n' 'City launcher must not receive public, Gitea, Mayor, or City API authority' >&2
+  exit 1
+fi
+
+# The permission reader is a private bridge-only role lookup proxy. It keeps a
+# scoped admin PAT in a secret file and exposes only a bearer-gated internal
+# permission endpoint for declared repositories.
+require '^  gitea-intake-permission-reader:$' "$permission_reader"
+require 'target: /run/secrets/city-mail/permission-reader.env' "$permission_reader"
+require 'read_only: true' "$permission_reader"
+require 'GITEA_URL: http://gitea:3000' "$permission_reader"
+require 'INTAKE_REPOSITORY_SCOPES:' "$permission_reader"
+require 'gitea:' "$permission_reader"
+require 'condition: service_healthy' "$permission_reader"
+if grep -Eq '^    ports:|INTAKE_MAIL_|GASCITY_|GITEA_MAIL_BRIDGE_WEBHOOK_SECRET|GITEA_MAYOR_TOKEN|GITEA_MAIL_BRIDGE_TOKEN:' "$permission_reader"; then
+  printf '%s\n' 'permission reader must remain private and hold only its scoped read-side authority' >&2
   exit 1
 fi
 
@@ -197,6 +217,11 @@ require 'gitea admin user list' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require '--must-change-password=false' "$root/scripts/bootstrap.sh"
 require 'city-mail-secrets/mayor.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'city-mail-secrets/launcher.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'city-mail-secrets/permission-reader.env' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_INTAKE_PERMISSION_READER_TOKEN' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_INTAKE_PERMISSION_READER_TOKEN_VERSION' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
+require 'read:user,read:repository' "$root/scripts/gitea-mail-bridge-bootstrap.sh"
 require 'city-mail-wake' "$root/docker/city-entrypoint.sh"
 require 'city-mail-mcp-proxy' "$root/scripts/codex-mayor"
 require '/usr/local/bin/codex "\$@" </dev/tty &' "$root/scripts/codex-mayor"
@@ -236,6 +261,9 @@ require '^INTAKE_MANIFEST_PATH=./config/gitea-intake.toml$' "$root/.env.example"
 require '^INTAKE_REPOSITORY_SCOPES=$' "$root/.env.example"
 require '^INTAKE_CITY_IDENTITIES=$' "$root/.env.example"
 require '^INTAKE_MINIMUM_REPOSITORY_ROLE=$' "$root/.env.example"
+require '^GITEA_INTAKE_PERMISSION_READER_TOKEN=$' "$root/.env.example"
+require '^GITEA_INTAKE_PERMISSION_READER_TOKEN_VERSION=1$' "$root/.env.example"
+require '^GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN=$' "$root/.env.example"
 if grep -Eq '^INTAKE_ELIGIBLE_COLLABORATORS=' "$root/.env.example"; then
   printf '%s\n' '.env.example must not define operator-maintained approval identities' >&2
   exit 1
