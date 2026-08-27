@@ -15,7 +15,6 @@ from typing import Any, NamedTuple
 
 
 CANONICAL_ATOM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
-PERMISSION_PATH = re.compile(r"^/v1/repos/([^/]+)/([^/]+)/collaborators/([^/]+)/permission$")
 KNOWN_PERMISSIONS = frozenset({"read", "triage", "write", "maintain", "admin", "owner"})
 
 
@@ -140,20 +139,26 @@ class ReaderHandler(http.server.BaseHTTPRequestHandler):
     upstream_timeout: float
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/health/liveness":
+        if self.path in {"/health/liveness", "/healthz"}:
             self._send_json(200, {"status": "ok"})
             return
-        match = PERMISSION_PATH.fullmatch(self.path)
-        if not match:
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path != "/v1/repository-role":
             self.send_error(404)
             return
         if self.headers.get("Authorization") != "Bearer " + self.binding.bearer_token:
             self.send_error(401, "bridge bearer token is required")
             return
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         try:
-            owner = canonical_atom(match.group(1), "owner")
-            repo = canonical_atom(match.group(2), "repository")
-            login = canonical_login(match.group(3))
+            instance = query.get("instance", [""])[0].strip().rstrip("/")
+            repository = query.get("repository", [""])[0]
+            login = canonical_login(query.get("login", [""])[0])
+            if instance != self.gitea_url.rstrip("/"):
+                raise ValueError("instance is not configured")
+            owner, separator, repo = repository.partition("/")
+            if not separator:
+                raise ValueError("repository must be owner/repo")
             allowed_repository(self.binding, owner, repo)
             permission = fetch_permission(self.binding, self.gitea_url, owner, repo, login, self.upstream_timeout)
         except ValueError as error:
@@ -172,7 +177,7 @@ class ReaderHandler(http.server.BaseHTTPRequestHandler):
         if permission is None:
             self.send_error(404, "collaborator permission not found")
             return
-        self._send_json(200, {"permission": permission})
+        self._send_json(200, {"role": permission})
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, separators=(",", ":")).encode()

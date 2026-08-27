@@ -6,6 +6,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -82,12 +83,17 @@ class PermissionReaderTest(unittest.TestCase):
         try:
             response = urllib.request.urlopen(
                 urllib.request.Request(
-                    f"http://127.0.0.1:{server.server_port}/v1/repos/owner/repo/collaborators/human/permission",
+                    (
+                        f"http://127.0.0.1:{server.server_port}/v1/repository-role"
+                        "?instance="
+                        + urllib.parse.quote(f"http://127.0.0.1:{upstream.server_port}", safe="")
+                        + "&repository=owner%2Frepo&login=human"
+                    ),
                     headers={"Authorization": "Bearer bridge-bearer"},
                 ),
                 timeout=3,
             )
-            self.assertEqual({"permission": "write"}, json.loads(response.read()))
+            self.assertEqual({"role": "write"}, json.loads(response.read()))
             self.assertEqual("token admin-read-token", Upstream.auth)
             self.assertEqual("/api/v1/repos/owner/repo/collaborators/human/permission", Upstream.path_seen)
         finally:
@@ -114,7 +120,7 @@ class PermissionReaderTest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(
                     urllib.request.Request(
-                        f"http://127.0.0.1:{server.server_port}/v1/repos/owner/repo/collaborators/human/permission"
+                        f"http://127.0.0.1:{server.server_port}/v1/repository-role?instance=http%3A%2F%2F127.0.0.1%3A1&repository=owner%2Frepo&login=human"
                     ),
                     timeout=3,
                 )

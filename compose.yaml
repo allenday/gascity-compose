@@ -295,8 +295,6 @@ services:
       timeout: 5s
       retries: 8
 
-  # Tracker-to-City intake is a separate private process from the status-only
-  # gitea-bridge. It has no City API, issue-write, or run-mutation credential.
   gitea-mail-bridge:
     profiles: [gitea-mail-bridge]
     # Keep the bridge unprivileged even when the host operator uses UID 0.
@@ -345,7 +343,7 @@ services:
       INTAKE_MAIL_BRIDGE_IDENTITY: ${INTAKE_MAIL_BRIDGE_IDENTITY:-gitea-mail-bridge}
       INTAKE_MAIL_MAYOR_IDENTITY: ${INTAKE_MAIL_MAYOR_IDENTITY:-gas-city-mayor}
       INTAKE_MAIL_LAUNCHER_IDENTITY: ${INTAKE_MAIL_LAUNCHER_IDENTITY:-gas-city-launcher}
-      INTAKE_PERMISSION_READER_URL: http://gitea-intake-permission-reader:8080/v1/repos
+      INTAKE_PERMISSION_READER_URL: http://gitea-intake-permission-reader:8080/v1/repository-role
       INTAKE_PERMISSION_READER_BEARER_TOKEN: ${GITEA_INTAKE_PERMISSION_READER_BEARER_TOKEN:-}
     volumes:
       - ./state/gitea-mail-bridge:/var/lib/gitea-mail-bridge
