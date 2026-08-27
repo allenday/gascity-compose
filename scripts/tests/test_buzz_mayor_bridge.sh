@@ -75,9 +75,10 @@ require 'GASCITY_GITEA_REF: \$\{GASCITY_GITEA_REF:\?Set GASCITY_GITEA_REF in \.e
 require 'git status --porcelain --untracked-files=all' "$root/compose.yaml"
 require 'git rev-parse HEAD' "$root/compose.yaml"
 require 'go build .*\./cmd/buzz-mayor-bridge' "$root/compose.yaml"
+require 'COPY --from=build /bin/busybox\.static /busybox' "$root/compose.yaml"
 require 'BUZZ_PUBLIC_RELAY_URL' "$root/compose.yaml"
 require 'BUZZ_RELAY_URL: \$\{BUZZ_MAYOR_BRIDGE_RELAY_URL:\?Set BUZZ_MAYOR_BRIDGE_RELAY_URL in \.env\}' "$root/compose.yaml"
-require '^GASCITY_GITEA_REF=827d768468a76787655ef46be24679301dc7e217$' "$root/.env.example"
+require '^GASCITY_GITEA_REF=b3f17be95941334b48e36b2c90303491761d376c$' "$root/.env.example"
 
 for script in buzz-mayor-bridge-bootstrap.sh buzz-mayor-bridge-preflight.sh; do
   [ -f "$root/scripts/$script" ] || fail "missing $script"
@@ -104,6 +105,6 @@ require 'buzz-mayor-bridge' "$root/.github/workflows/ci.yml"
 require 'test_buzz_mayor_bridge\.sh' "$root/.github/workflows/ci.yml"
 require 'BUZZ_MAYOR_BRIDGE_RELAY_URL: http://buzz-relay:3000' "$root/.github/workflows/ci.yml"
 require 'BUZZ_PUBLIC_RELAY_URL: http://100.64.0.1:3003' "$root/.github/workflows/ci.yml"
-require 'GASCITY_GITEA_REF: 827d768468a76787655ef46be24679301dc7e217' "$root/.github/workflows/ci.yml"
+require 'GASCITY_GITEA_REF: b3f17be95941334b48e36b2c90303491761d376c' "$root/.github/workflows/ci.yml"
 
 printf '%s\n' 'PASS: isolated Buzz Mayor bridge deployment contract is configured'

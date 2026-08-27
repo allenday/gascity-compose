@@ -449,7 +449,7 @@ services:
             && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/buzz-mayor-bridge ./cmd/buzz-mayor-bridge
         FROM gcr.io/distroless/static-debian12:nonroot
         COPY --from=build /out/buzz-mayor-bridge /buzz-mayor-bridge
-        COPY --from=build /bin/busybox /busybox
+        COPY --from=build /bin/busybox.static /busybox
         USER nonroot:nonroot
         ENTRYPOINT ["/buzz-mayor-bridge"]
     environment:

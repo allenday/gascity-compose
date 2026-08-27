@@ -353,7 +353,7 @@ internal name. Its Docker health check calls `/readyz`, which becomes healthy
 only after the core has completed its initial authenticated relay query.
 
 `GASCITY_GITEA_REF` is pinned in `.env.example` to
-`827d768468a76787655ef46be24679301dc7e217`, the full immutable merged
+`b3f17be95941334b48e36b2c90303491761d376c`, the full immutable merged
 `gascity-gitea` revision that includes `cmd/buzz-mayor-bridge` and
 dual-coordinate Host handling. The preflight refuses a dirty checkout, a
 non-full SHA, or a checkout at a different revision. Do not use a branch or
