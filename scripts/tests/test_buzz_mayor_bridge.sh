@@ -54,7 +54,7 @@ printf '%s\n' "$bridge" | grep -Fq 'BUZZ_AGENT_MAIL_URL: http://mcp-agent-mail:8
   fail 'buzz-mayor-bridge must use only the private Agent Mail endpoint'
 printf '%s\n' "$bridge" | grep -Fq 'BUZZ_RELAY_URL: http://buzz-relay:3000' ||
   fail 'buzz-mayor-bridge must use the private relay transport coordinate'
-printf '%s\n' "$bridge" | grep -Fq 'BUZZ_PUBLIC_RELAY_URL: ws://100.64.0.1:3003' ||
+printf '%s\n' "$bridge" | grep -Fq 'BUZZ_PUBLIC_RELAY_URL: http://100.64.0.1:3003' ||
   fail 'buzz-mayor-bridge must preserve the canonical public relay authority'
 
 bridge_environment=$(environment_block "$bridge")
@@ -76,6 +76,8 @@ require 'git status --porcelain --untracked-files=all' "$root/compose.yaml"
 require 'git rev-parse HEAD' "$root/compose.yaml"
 require 'go build .*\./cmd/buzz-mayor-bridge' "$root/compose.yaml"
 require 'BUZZ_PUBLIC_RELAY_URL' "$root/compose.yaml"
+require 'BUZZ_RELAY_URL: \$\{BUZZ_MAYOR_BRIDGE_RELAY_URL:\?Set BUZZ_MAYOR_BRIDGE_RELAY_URL in \.env\}' "$root/compose.yaml"
+require '^GASCITY_GITEA_REF=827d768468a76787655ef46be24679301dc7e217$' "$root/.env.example"
 
 for script in buzz-mayor-bridge-bootstrap.sh buzz-mayor-bridge-preflight.sh; do
   [ -f "$root/scripts/$script" ] || fail "missing $script"
@@ -85,7 +87,10 @@ require 'GASCITY_GITEA_REF' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require 'buzz-admin add-member' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'channels create' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'channels add-member' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
+require 'buzz-mayor-bridge --preflight' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require '/readyz' "$root/scripts/buzz-mayor-bridge-preflight.sh"
+require 'canonical relay host authorities differ' "$root/scripts/buzz-mayor-bridge-preflight.sh"
+require 'floating Buzz relay image' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 
 require '^buzz-mayor-bridge-bootstrap:' "$root/Makefile"
 require '^buzz-mayor-bridge-up:' "$root/Makefile"
@@ -93,5 +98,8 @@ require '^buzz-mayor-bridge-smoke:' "$root/Makefile"
 require 'test_buzz_mayor_bridge\.sh' "$root/Makefile"
 require 'buzz-mayor-bridge' "$root/.github/workflows/ci.yml"
 require 'test_buzz_mayor_bridge\.sh' "$root/.github/workflows/ci.yml"
+require 'BUZZ_MAYOR_BRIDGE_RELAY_URL: http://buzz-relay:3000' "$root/.github/workflows/ci.yml"
+require 'BUZZ_PUBLIC_RELAY_URL: http://100.64.0.1:3003' "$root/.github/workflows/ci.yml"
+require 'GASCITY_GITEA_REF: 827d768468a76787655ef46be24679301dc7e217' "$root/.github/workflows/ci.yml"
 
 printf '%s\n' 'PASS: isolated Buzz Mayor bridge deployment contract is configured'

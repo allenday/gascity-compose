@@ -33,9 +33,31 @@ require_url() {
   }
 }
 
-public_url="$(require_value BUZZ_RELAY_URL)"
-case "$public_url" in ws://*|wss://*) ;; *) printf '%s\n' 'ERROR: BUZZ_RELAY_URL must be the canonical external ws(s) URL' >&2; exit 1 ;; esac
+canonical_authority() {
+  url="$1"
+  scheme="${url%%://*}"
+  authority_and_path="${url#*://}"
+  authority="${authority_and_path%%/*}"
+  case "$authority" in
+    *:*) ;;
+    *)
+      case "$scheme" in
+        http|ws) authority="$authority:80" ;;
+        https|wss) authority="$authority:443" ;;
+      esac
+      ;;
+  esac
+  printf '%s' "$authority" | tr '[:upper:]' '[:lower:]'
+}
+
+public_url="$(require_value BUZZ_PUBLIC_RELAY_URL)"
+require_url BUZZ_PUBLIC_RELAY_URL 'https?'
+human_url="$(require_value BUZZ_RELAY_URL)"
 require_url BUZZ_RELAY_URL 'wss?'
+[ "$(canonical_authority "$public_url")" = "$(canonical_authority "$human_url")" ] || {
+  printf '%s\n' 'ERROR: canonical relay host authorities differ between BUZZ_RELAY_URL and BUZZ_PUBLIC_RELAY_URL' >&2
+  exit 1
+}
 internal_url="$(require_value BUZZ_MAYOR_BRIDGE_RELAY_URL)"
 [ "$internal_url" = http://buzz-relay:3000 ] || {
   printf '%s\n' 'ERROR: BUZZ_MAYOR_BRIDGE_RELAY_URL must be http://buzz-relay:3000' >&2
@@ -89,13 +111,30 @@ git -C "$source_dir" diff --quiet && git -C "$source_dir" diff --cached --quiet 
   exit 1
 }
 
-docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge config --quiet
+rendered="$(mktemp)"
+trap 'rm -f "$rendered"' EXIT
+docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge config >"$rendered"
+relay_image="$(awk '
+  $0 == "  buzz-relay:" { inside = 1; next }
+  inside && /^  [[:alnum:]_-]+:$/ { exit }
+  inside && /^    image: / { sub(/^    image: /, ""); print; exit }
+' "$rendered")"
+printf '%s\n' "$relay_image" | grep -Eq '^ghcr\.io/block/buzz:sha-[0-9a-f]{7,}@sha256:[0-9a-f]{64}$' || {
+  printf '%s\n' 'ERROR: floating Buzz relay image is not allowed' >&2
+  exit 1
+}
 
-# Starting this service forces the pinned core to perform its initial signed
-# internal query. #48 preserves the canonical public Host from
-# BUZZ_PUBLIC_RELAY_URL; /readyz is healthy only after that reconciliation.
+# Build the exact pinned core, then execute its bounded signed query before
+# steady-state startup. #48 sends the request to the internal relay while
+# deriving the canonical public Host only from BUZZ_PUBLIC_RELAY_URL.
 docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
-  up -d --build --wait --wait-timeout 180 buzz-relay mcp-agent-mail buzz-mayor-bridge
+  build buzz-mayor-bridge
+docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
+  up -d --wait --wait-timeout 120 buzz-relay
+docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
+  run --rm --no-deps buzz-mayor-bridge --preflight
+docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
+  up -d --wait --wait-timeout 180 mcp-agent-mail buzz-mayor-bridge
 docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
   exec -T buzz-mayor-bridge /busybox wget -q -O - http://127.0.0.1:8080/readyz >/dev/null
 printf '%s\n' 'PASS: authenticated internal Buzz query preserved the canonical public relay Host'

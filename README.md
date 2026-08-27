@@ -344,18 +344,20 @@ mount is `state/buzz-mayor-bridge/ledger.json`; the core bridge owns the
 replay-safe mapping between Buzz event IDs and Agent Mail messages.
 
 The service deliberately uses two different relay coordinates. Human clients
-keep using the canonical Tailnet `BUZZ_RELAY_URL` (`ws://` or `wss://`), which
-the bridge supplies to the core as `BUZZ_PUBLIC_RELAY_URL` for canonical Host
-preservation. The bridge's transport itself is fixed to the private
+keep using the canonical Tailnet `BUZZ_RELAY_URL` (`ws://` or `wss://`). The
+bridge receives the same canonical authority in HTTP(S) form as
+`BUZZ_PUBLIC_RELAY_URL`, which the raw core requires for canonical Host
+preservation. Its transport itself is fixed to the private
 `BUZZ_MAYOR_BRIDGE_RELAY_URL=http://buzz-relay:3000`; it never publishes that
 internal name. Its Docker health check calls `/readyz`, which becomes healthy
 only after the core has completed its initial authenticated relay query.
 
-Before enabling the profile, set `GASCITY_GITEA_REF` to the full immutable
-merged `gascity-gitea` revision that includes `cmd/buzz-mayor-bridge` and its
+`GASCITY_GITEA_REF` is pinned in `.env.example` to
+`827d768468a76787655ef46be24679301dc7e217`, the full immutable merged
+`gascity-gitea` revision that includes `cmd/buzz-mayor-bridge` and
 dual-coordinate Host handling. The preflight refuses a dirty checkout, a
 non-full SHA, or a checkout at a different revision. Do not use a branch or
-floating tag. This pin is intentionally not set by the relay foundation.
+floating tag.
 
 The dedicated bootstrap uses upstream `buzz-admin` only to generate the
 bridge's persistent Nostr keypair and reconcile relay membership. It uses the
@@ -375,12 +377,13 @@ make buzz-mayor-bridge-bootstrap ENV_FILE=.env
 make buzz-mayor-bridge-up ENV_FILE=.env
 ```
 
-The second command runs strict configuration/source preflight and starts the
-relay, private Agent Mail service, and bridge with `--wait`. It additionally
-checks `/readyz`, proving the core's authenticated private query was issued
-with the canonical external Host. Live bidirectional acceptance and replay
-evidence are intentionally provided by the separate Buzz Mayor fixture, not by
-this deployment target.
+The second command runs strict configuration/source preflight, builds the
+pinned command, and executes its bounded `--preflight` authenticated private
+query before starting the relay, private Agent Mail service, and bridge with
+`--wait`. It additionally checks `/readyz`, proving the steady-state bridge
+has reconciled successfully after the canonical-Host preflight. Live
+bidirectional acceptance and replay evidence are intentionally provided by the
+separate Buzz Mayor fixture, not by this deployment target.
 
 ### Tracker-to-City mail intake
 
