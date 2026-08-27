@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Validate all Compose profiles
         env:
           CITY_DIR: ${{ github.workspace }}/fixture-city

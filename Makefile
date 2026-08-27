@@ -88,6 +88,7 @@ woodpecker-acceptance:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/woodpecker-acceptance.sh
 
 test:
+	sh ./scripts/tests/test_generic_foundation_pin.sh
 	sh ./scripts/tests/test_buzz_profile.sh
 	sh ./scripts/tests/test_buzz_mayor_bridge.sh
 	sh ./scripts/tests/test_woodpecker_fixture.sh
