@@ -112,7 +112,7 @@ mcp_call() {
   arguments="$2"
   payload="$(jq -nc --arg tool "$tool" --argjson arguments "$arguments" \
     '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$tool,arguments:$arguments}}')"
-  printf '%s' "$payload" | compose --profile buzz-mayor-bridge exec -T mcp-agent-mail python3 -c '
+  printf '%s' "$payload" | compose --profile buzz --profile buzz-mayor-bridge exec -T mcp-agent-mail python3 -c '
 import sys, urllib.request
 body = sys.stdin.buffer.read()
 request = urllib.request.Request("http://127.0.0.1:8765/mcp", data=body, headers={"Authorization": "Bearer " + sys.argv[1], "Content-Type": "application/json", "Accept": "application/json"})

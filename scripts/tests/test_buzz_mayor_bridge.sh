@@ -90,6 +90,7 @@ require 'BUZZ_RELAY_URL="\$cli_relay_url"' "$root/scripts/buzz-mayor-bridge-boot
 require 'channels create' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'channels add-member' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'compose --profile buzz --profile buzz-mayor-bridge up -d --wait --wait-timeout 90 mcp-agent-mail' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
+require 'compose --profile buzz --profile buzz-mayor-bridge exec -T mcp-agent-mail' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'buzz-mayor-bridge --preflight' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require '/readyz' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require 'canonical relay host authorities differ' "$root/scripts/buzz-mayor-bridge-preflight.sh"
