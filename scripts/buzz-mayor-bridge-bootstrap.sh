@@ -36,6 +36,9 @@ compose() {
 }
 
 relay_url="$(require_value BUZZ_RELAY_URL)"
+# The deployed relay advertises its public WebSocket URL, while the upstream
+# host CLI speaks the same Nginx authority over HTTP(S).
+cli_relay_url="$(printf '%s' "$relay_url" | sed -e 's#^ws://#http://#' -e 's#^wss://#https://#')"
 channel_admin_key="$(require_value BUZZ_CHANNEL_ADMIN_PRIVATE_KEY)"
 cli="$(value_for BUZZ_CLI)"
 cli="${cli:-buzz}"
@@ -66,11 +69,11 @@ fi
 
 channel="$(value_for BUZZ_MAYOR_CHANNEL_ID)"
 if [ -z "$channel" ]; then
-  channel="$(BUZZ_RELAY_URL="$relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels create \
+  channel="$(BUZZ_RELAY_URL="$cli_relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels create \
     --name buzz-mayor --type stream --visibility private | jq -er '.channel_id')"
   set_value BUZZ_MAYOR_CHANNEL_ID "$channel"
 else
-  BUZZ_RELAY_URL="$relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels get --channel "$channel" |
+  BUZZ_RELAY_URL="$cli_relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels get --channel "$channel" |
     jq -e --arg channel "$channel" '.channel_id == $channel' >/dev/null
 fi
 
@@ -86,9 +89,9 @@ for human_key in $(printf '%s' "$human_keys" | tr ',' ' '); do ensure_relay_memb
 
 ensure_channel_member() {
   key="$1"
-  if ! BUZZ_RELAY_URL="$relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels members --channel "$channel" |
+  if ! BUZZ_RELAY_URL="$cli_relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels members --channel "$channel" |
     jq -e --arg key "$key" 'map(.pubkey) | index($key) != null' >/dev/null; then
-    BUZZ_RELAY_URL="$relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels add-member \
+    BUZZ_RELAY_URL="$cli_relay_url" BUZZ_PRIVATE_KEY="$channel_admin_key" "$cli" channels add-member \
       --channel "$channel" --pubkey "$key" --role member | jq -e '.accepted == true' >/dev/null
   fi
 }

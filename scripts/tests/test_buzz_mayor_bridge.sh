@@ -85,6 +85,8 @@ for script in buzz-mayor-bridge-bootstrap.sh buzz-mayor-bridge-preflight.sh; do
 done
 require 'GASCITY_GITEA_REF' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require 'buzz-admin add-member' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
+require 'cli_relay_url=' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
+require 'BUZZ_RELAY_URL="\$cli_relay_url"' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'channels create' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'channels add-member' "$root/scripts/buzz-mayor-bridge-bootstrap.sh"
 require 'buzz-mayor-bridge --preflight' "$root/scripts/buzz-mayor-bridge-preflight.sh"
