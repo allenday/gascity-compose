@@ -50,6 +50,14 @@ if [ "${SUPERPOWERS_PACK_ENABLED:-true}" = "true" ] && \
     --version "${SUPERPOWERS_PACK_VERSION:-sha:3b3b89f2011e06d84459aa7bea1552382f13930a}"
 fi
 
+# The docs-impact agent definition and skill come from the exact read-only pack
+# checkout used by the intake services. Only the trusted City imports it; the
+# public webhook and networkless evidence worker never receive Codex auth.
+if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
+   ! grep -Eq '^[[:space:]]*\[imports\.github\][[:space:]]*$' "$CITY_PATH/pack.toml"; then
+  gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github
+fi
+
 # The city lockfile pins remote packs but the controller cache lives in the
 # Compose runtime mount, not in the source checkout. Populate it on every
 # start; gc import install is idempotent when the lock is already cached.
@@ -61,6 +69,10 @@ fi
 
 if [ "${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-local-launch &
+fi
+
+if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
+  python3 -u /opt/gascity-packs/github/scripts/github_intake_city_docs_launcher.py &
 fi
 
 exec gc supervisor run

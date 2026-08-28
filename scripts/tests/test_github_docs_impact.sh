@@ -13,8 +13,6 @@ require() {
 require 'github-webhook:' "$compose"
 require 'github-admin:' "$compose"
 require 'github-docs-patch-worker:' "$compose"
-require 'github-docs-model-egress:' "$compose"
-require 'github-docs-techdocs-reviewer:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -48,9 +46,11 @@ worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} insi
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
 reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
-[ -n "$reviewer_block" ] || { echo 'github-docs-techdocs-reviewer service block is missing' >&2; exit 1; }
 egress_block=$(awk '/^  github-docs-model-egress:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-model-egress:/{exit}' "$compose")
-[ -n "$egress_block" ] || { echo 'github-docs-model-egress service block is missing' >&2; exit 1; }
+city_block=$(awk '/^  city:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  city:/{exit}' "$compose")
+[ -n "$city_block" ] || { echo 'city service block is missing' >&2; exit 1; }
+[ -z "$reviewer_block" ] || { echo 'legacy cagent reviewer service must be removed' >&2; exit 1; }
+[ -z "$egress_block" ] || { echo 'legacy OpenAI model egress service must be removed' >&2; exit 1; }
 
 require_webhook() {
   pattern=$1
@@ -98,62 +98,49 @@ forbid_worker '\$\{CITY_DIR'
 forbid_worker './config/github-intake'
 forbid_worker '^    ports:'
 
-require_reviewer() {
+require_city() {
   pattern=$1
-  printf '%s\n' "$reviewer_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-docs-techdocs-reviewer" >&2
+  printf '%s\n' "$city_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in city" >&2
     exit 1
   }
 }
 
-forbid_reviewer() {
+forbid_city() {
   pattern=$1
-  if printf '%s\n' "$reviewer_block" | grep -Eq "$pattern"; then
-    echo "forbidden $pattern in github-docs-techdocs-reviewer" >&2
+  if printf '%s\n' "$city_block" | grep -Eq "$pattern"; then
+    echo "forbidden $pattern in city" >&2
     exit 1
   fi
 }
 
-require_egress() {
-  pattern=$1
-  printf '%s\n' "$egress_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-docs-model-egress" >&2
-    exit 1
-  }
-}
+# Codex authentication stays in the already-trusted City runtime. The City
+# queue launcher sees sanitized snapshots read-only, creates immutable local
+# copies, and returns digest-bound candidates to the networkless validator.
+require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
+require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
+require_city 'GC_CITY_DOCS_REVIEW_TARGET: github.docs-impact-reviewer'
+require_city 'docs-patch-snapshots.*:/var/lib/github-docs-impact/snapshot:ro'
+require_city 'docs-patch-candidates.*:/var/lib/github-docs-impact/candidate'
+require_city 'docs-review-immutable.*:/var/lib/github-docs-impact/immutable'
+require_city 'docs-review-dispatch.*:/var/lib/github-docs-impact/dispatch'
+require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
+forbid_city 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
 
-forbid_egress() {
-  pattern=$1
-  if printf '%s\n' "$egress_block" | grep -Eq "$pattern"; then
-    echo "forbidden $pattern in github-docs-model-egress" >&2
-    exit 1
-  fi
-}
+require 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.sh"
+require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
+require '^\[providers\.codex-docs-impact\]$' "$root/config/city-cost-safe.toml"
+require 'gpt-5\.6-terra' "$root/config/city-cost-safe.toml"
+require 'model_reasoning_effort=medium' "$root/config/city-cost-safe.toml"
 
-# The model reviewer has exactly one network path: an internal network whose
-# only egress peer is the credentialless, endpoint-pinned gateway.
-require_reviewer 'GC_TECHDOCS_MODEL_ENDPOINT: http://github-docs-model-egress:3128/v1'
-require_reviewer '^    networks:'
-require_reviewer '^      - github-docs-model$'
-forbid_reviewer '^      - default$'
-forbid_reviewer 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
-forbid_reviewer '\$\{CITY_DIR'
-forbid_reviewer '^    ports:'
-
-require_egress 'github_docs_model_egress_proxy.py'
-require_egress 'GC_TECHDOCS_MODEL_UPSTREAM_ENDPOINT:.*GC_TECHDOCS_MODEL_ENDPOINT:-'
-require_egress '^    networks:'
-require_egress '^      - github-docs-model$'
-require_egress '^      - default$'
-require_egress 'read_only: true'
-require_egress 'cap_drop:'
-forbid_egress 'GC_TECHDOCS_MODEL_TOKEN'
-forbid_egress 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
-forbid_egress '\$\{CITY_DIR'
-forbid_egress '^    ports:'
-
-require '^  github-docs-model:$' "$compose"
-require '^    internal: true$' "$compose"
+if [ "$(grep -Fc '/run/secrets/codex-auth.json' "$compose")" -ne 1 ]; then
+  echo 'Codex auth must be mounted only into the trusted City service' >&2
+  exit 1
+fi
+if grep -Eq 'GC_TECHDOCS_MODEL_(TOKEN|ENDPOINT)|github_docs_model_egress_proxy|github_intake_city_techdocs_adapter|github-docs-model' "$compose"; then
+  echo 'legacy OpenAI API-key/cagent reviewer route must be absent' >&2
+  exit 1
+fi
 
 # The trusted rule subprocess shares the exact queue directories, waits longer
 # than the worker's default adapter timeout, and alone receives the token used

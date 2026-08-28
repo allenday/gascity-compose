@@ -164,80 +164,6 @@ services:
     # the revision-bound snapshot, and malformed/stale output is recomputed.
     restart: unless-stopped
 
-  # The credentialless gateway is the only service in this profile with normal
-  # network egress. It always rewrites reviewer traffic to the single configured
-  # model authority and rejects proxy-form requests.
-  github-docs-model-egress:
-    profiles: [github-docs-impact]
-    image: gascity-github-webhook
-    entrypoint: ["python3", "-u", "/opt/gascity-compose/scripts/github_docs_model_egress_proxy.py"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    environment:
-      GC_TECHDOCS_MODEL_UPSTREAM_ENDPOINT: ${GC_TECHDOCS_MODEL_ENDPOINT:-http://not-configured.invalid/v1}
-      GC_TECHDOCS_MODEL_EGRESS_HOST: 0.0.0.0
-      GC_TECHDOCS_MODEL_EGRESS_PORT: "3128"
-      HOME: /tmp
-    volumes:
-      - ./scripts/github_docs_model_egress_proxy.py:/opt/gascity-compose/scripts/github_docs_model_egress_proxy.py:ro
-    read_only: true
-    tmpfs:
-      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
-    networks:
-      - github-docs-model
-      - default
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
-  # cagent gets only the exact-SHA evidence assignment, vendored review skill,
-  # and (if required) a model-scoped token. Its sole network peer is the pinned
-  # model gateway; it has no GitHub credential, City state, checkout, tools, or
-  # host port. Its raw response is validated by the networkless worker.
-  github-docs-techdocs-reviewer:
-    profiles: [github-docs-impact]
-    image: gascity-github-webhook
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        while :; do
-          for assignment in /work/snapshot/*.json; do
-            test -f "$$assignment" || continue
-            name=$${assignment##*/}
-            review=/work/candidate/$$name
-            test -f "$$review" && continue
-            python3 -u /opt/gascity-packs/github/scripts/github_intake_city_techdocs_adapter.py \
-              --assignment-file "$$assignment" --review-file "$$review" \
-              --skill-dir /opt/gascity-packs/github/skills/developer-experience-techdocs || true
-          done
-          sleep 1
-        done
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    environment:
-      GC_TECHDOCS_MODEL_ENDPOINT: http://github-docs-model-egress:3128/v1
-      GC_TECHDOCS_MODEL: ${GC_TECHDOCS_MODEL:-gpt-5.6-terra}
-      GC_TECHDOCS_MODEL_TOKEN: ${GC_TECHDOCS_MODEL_TOKEN:-}
-      TELEMETRY_ENABLED: "false"
-      HOME: /tmp
-    volumes:
-      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
-      - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
-      - ./state/github-intake/docs-patch-candidates:/work/candidate
-    read_only: true
-    tmpfs:
-      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
-    networks:
-      - github-docs-model
-    depends_on:
-      - github-docs-model-egress
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
     profiles: [city]
@@ -287,6 +213,15 @@ services:
       SUPERPOWERS_PACK_ENABLED: ${SUPERPOWERS_PACK_ENABLED:-true}
       SUPERPOWERS_PACK_SOURCE: ${SUPERPOWERS_PACK_SOURCE:-https://github.com/gastownhall/gascity-packs/tree/main/superpowers}
       SUPERPOWERS_PACK_VERSION: ${SUPERPOWERS_PACK_VERSION:-sha:3b3b89f2011e06d84459aa7bea1552382f13930a}
+      # Review sanitized exact-SHA evidence through this already-authenticated
+      # trusted City. The reviewer has no GitHub credential or publisher path.
+      GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
+      GC_CITY_DOCS_REVIEW_TARGET: github.docs-impact-reviewer
+      GC_CITY_DOCS_SNAPSHOT_DIR: /var/lib/github-docs-impact/snapshot
+      GC_CITY_DOCS_IMMUTABLE_DIR: /var/lib/github-docs-impact/immutable
+      GC_CITY_DOCS_CANDIDATE_DIR: /var/lib/github-docs-impact/candidate
+      GC_CITY_DOCS_DISPATCH_DIR: /var/lib/github-docs-impact/dispatch
+      GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
@@ -294,11 +229,16 @@ services:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
       - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
+      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
       - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in .env to the host Codex auth file}:/run/secrets/codex-auth.json:ro
       - ./codex:/run/secrets/codex-config:ro
       - ./state/city-mail-secrets:/run/secrets/city-mail:ro
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
+      - ./state/github-intake/docs-patch-snapshots:/var/lib/github-docs-impact/snapshot:ro
+      - ./state/github-intake/docs-patch-candidates:/var/lib/github-docs-impact/candidate
+      - ./state/github-intake/docs-review-immutable:/var/lib/github-docs-impact/immutable
+      - ./state/github-intake/docs-review-dispatch:/var/lib/github-docs-impact/dispatch
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
@@ -1022,7 +962,5 @@ services:
     restart: unless-stopped
 
 networks:
-  github-docs-model:
-    internal: true
   woodpecker:
     name: gascity-woodpecker
