@@ -91,6 +91,7 @@ test:
 	sh ./scripts/tests/test_buzz_profile.sh
 	sh ./scripts/tests/test_buzz_mayor_bridge.sh
 	sh ./scripts/tests/test_github_docs_impact.sh
+	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_github_docs_model_egress_proxy.py
 	sh ./scripts/tests/test_woodpecker_fixture.sh
 	sh ./scripts/tests/test_gitea_mail_bridge.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py

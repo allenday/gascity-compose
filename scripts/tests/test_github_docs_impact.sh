@@ -13,6 +13,8 @@ require() {
 require 'github-webhook:' "$compose"
 require 'github-admin:' "$compose"
 require 'github-docs-patch-worker:' "$compose"
+require 'github-docs-model-egress:' "$compose"
+require 'github-docs-techdocs-reviewer:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -45,6 +47,10 @@ worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} insi
 [ -n "$worker_block" ] || { echo 'github-docs-patch-worker service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
+reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
+[ -n "$reviewer_block" ] || { echo 'github-docs-techdocs-reviewer service block is missing' >&2; exit 1; }
+egress_block=$(awk '/^  github-docs-model-egress:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-model-egress:/{exit}' "$compose")
+[ -n "$egress_block" ] || { echo 'github-docs-model-egress service block is missing' >&2; exit 1; }
 
 require_webhook() {
   pattern=$1
@@ -91,6 +97,63 @@ forbid_worker 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
 forbid_worker '\$\{CITY_DIR'
 forbid_worker './config/github-intake'
 forbid_worker '^    ports:'
+
+require_reviewer() {
+  pattern=$1
+  printf '%s\n' "$reviewer_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-docs-techdocs-reviewer" >&2
+    exit 1
+  }
+}
+
+forbid_reviewer() {
+  pattern=$1
+  if printf '%s\n' "$reviewer_block" | grep -Eq "$pattern"; then
+    echo "forbidden $pattern in github-docs-techdocs-reviewer" >&2
+    exit 1
+  fi
+}
+
+require_egress() {
+  pattern=$1
+  printf '%s\n' "$egress_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-docs-model-egress" >&2
+    exit 1
+  }
+}
+
+forbid_egress() {
+  pattern=$1
+  if printf '%s\n' "$egress_block" | grep -Eq "$pattern"; then
+    echo "forbidden $pattern in github-docs-model-egress" >&2
+    exit 1
+  fi
+}
+
+# The model reviewer has exactly one network path: an internal network whose
+# only egress peer is the credentialless, endpoint-pinned gateway.
+require_reviewer 'GC_TECHDOCS_MODEL_ENDPOINT: http://github-docs-model-egress:3128/v1'
+require_reviewer '^    networks:'
+require_reviewer '^      - github-docs-model$'
+forbid_reviewer '^      - default$'
+forbid_reviewer 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
+forbid_reviewer '\$\{CITY_DIR'
+forbid_reviewer '^    ports:'
+
+require_egress 'github_docs_model_egress_proxy.py'
+require_egress 'GC_TECHDOCS_MODEL_UPSTREAM_ENDPOINT:.*GC_TECHDOCS_MODEL_ENDPOINT:-'
+require_egress '^    networks:'
+require_egress '^      - github-docs-model$'
+require_egress '^      - default$'
+require_egress 'read_only: true'
+require_egress 'cap_drop:'
+forbid_egress 'GC_TECHDOCS_MODEL_TOKEN'
+forbid_egress 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
+forbid_egress '\$\{CITY_DIR'
+forbid_egress '^    ports:'
+
+require '^  github-docs-model:$' "$compose"
+require '^    internal: true$' "$compose"
 
 # The trusted rule subprocess shares the exact queue directories, waits longer
 # than the worker's default adapter timeout, and alone receives the token used

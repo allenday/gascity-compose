@@ -164,10 +164,37 @@ services:
     # the revision-bound snapshot, and malformed/stale output is recomputed.
     restart: unless-stopped
 
-  # Egress is isolated here: cagent gets only the exact-SHA evidence assignment,
-  # vendored review skill, and (if required) a model-scoped token.  It has no
-  # GitHub credential, City state, checkout, tools, or host port.  Its raw
-  # response is validated and enveloped by the separate networkless worker.
+  # The credentialless gateway is the only service in this profile with normal
+  # network egress. It always rewrites reviewer traffic to the single configured
+  # model authority and rejects proxy-form requests.
+  github-docs-model-egress:
+    profiles: [github-docs-impact]
+    image: gascity-github-webhook
+    entrypoint: ["python3", "-u", "/opt/gascity-compose/scripts/github_docs_model_egress_proxy.py"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      GC_TECHDOCS_MODEL_UPSTREAM_ENDPOINT: ${GC_TECHDOCS_MODEL_ENDPOINT:-http://not-configured.invalid/v1}
+      GC_TECHDOCS_MODEL_EGRESS_HOST: 0.0.0.0
+      GC_TECHDOCS_MODEL_EGRESS_PORT: "3128"
+      HOME: /tmp
+    volumes:
+      - ./scripts/github_docs_model_egress_proxy.py:/opt/gascity-compose/scripts/github_docs_model_egress_proxy.py:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
+    networks:
+      - github-docs-model
+      - default
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  # cagent gets only the exact-SHA evidence assignment, vendored review skill,
+  # and (if required) a model-scoped token. Its sole network peer is the pinned
+  # model gateway; it has no GitHub credential, City state, checkout, tools, or
+  # host port. Its raw response is validated by the networkless worker.
   github-docs-techdocs-reviewer:
     profiles: [github-docs-impact]
     image: gascity-github-webhook
@@ -189,9 +216,7 @@ services:
         done
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
-      # An invalid default keeps the profile fail-closed while allowing config
-      # validation without local model credentials.
-      GC_TECHDOCS_MODEL_ENDPOINT: ${GC_TECHDOCS_MODEL_ENDPOINT:-http://not-configured.invalid/v1}
+      GC_TECHDOCS_MODEL_ENDPOINT: http://github-docs-model-egress:3128/v1
       GC_TECHDOCS_MODEL: ${GC_TECHDOCS_MODEL:-gpt-5.6-terra}
       GC_TECHDOCS_MODEL_TOKEN: ${GC_TECHDOCS_MODEL_TOKEN:-}
       TELEMETRY_ENABLED: "false"
@@ -203,6 +228,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
+    networks:
+      - github-docs-model
+    depends_on:
+      - github-docs-model-egress
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -993,5 +1022,7 @@ services:
     restart: unless-stopped
 
 networks:
+  github-docs-model:
+    internal: true
   woodpecker:
     name: gascity-woodpecker
