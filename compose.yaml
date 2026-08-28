@@ -430,28 +430,7 @@ services:
   buzz-mayor-bridge:
     profiles: [buzz-mayor-bridge]
     user: "65532:65532"
-    build:
-      context: ${GASCITY_GITEA_DIR:-${GITEA_BRIDGE_DIR:-../gascity-gitea}}
-      args:
-        # .env.example pins the merged dual-coordinate bridge core. Preflight
-        # also rejects anything except a clean checkout at this full object ID.
-        GASCITY_GITEA_REF: ${GASCITY_GITEA_REF:?Set GASCITY_GITEA_REF in .env}
-      dockerfile_inline: |
-        FROM golang:1.24-alpine AS build
-        ARG GASCITY_GITEA_REF
-        RUN apk add --no-cache git busybox-static
-        WORKDIR /src
-        COPY go.mod ./
-        RUN go mod download
-        COPY . .
-        RUN test -z "$$(git status --porcelain --untracked-files=all)" \
-            && test "$$(git rev-parse HEAD)" = "$${GASCITY_GITEA_REF}" \
-            && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/buzz-mayor-bridge ./cmd/buzz-mayor-bridge
-        FROM gcr.io/distroless/static-debian12:nonroot
-        COPY --from=build /out/buzz-mayor-bridge /buzz-mayor-bridge
-        COPY --from=build /bin/busybox.static /busybox
-        USER nonroot:nonroot
-        ENTRYPOINT ["/buzz-mayor-bridge"]
+    image: ghcr.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:13fda15e66733adf199e3b5d7ea842a2c3397f3a9f40cc97c6c826db49fcc20f
     environment:
       BUZZ_MAYOR_BRIDGE_ADDR: :8080
       # The core's raw-event client requires HTTP(S), so this is the private

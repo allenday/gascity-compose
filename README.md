@@ -352,12 +352,10 @@ preservation. Its transport itself is fixed to the private
 internal name. Its Docker health check calls `/readyz`, which becomes healthy
 only after the core has completed its initial authenticated relay query.
 
-`GASCITY_GITEA_REF` is pinned in `.env.example` to
-`b3f17be95941334b48e36b2c90303491761d376c`, the full immutable merged
-`gascity-gitea` revision that includes `cmd/buzz-mayor-bridge` and
-dual-coordinate Host handling. The preflight refuses a dirty checkout, a
-non-full SHA, or a checkout at a different revision. Do not use a branch or
-floating tag.
+Compose deploys the Buzz-owned bridge image pinned by its immutable manifest
+digest: `ghcr.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:13fda15e66733adf199e3b5d7ea842a2c3397f3a9f40cc97c6c826db49fcc20f`.
+The deployment has no Buzz-bridge Gitea checkout or source-revision setting.
+Do not replace this digest with a branch, tag, or other floating image reference.
 
 The dedicated bootstrap uses upstream `buzz-admin` only to generate the
 bridge's persistent Nostr keypair and reconcile relay membership. It uses the
@@ -377,9 +375,9 @@ make buzz-mayor-bridge-bootstrap ENV_FILE=.env
 make buzz-mayor-bridge-up ENV_FILE=.env
 ```
 
-The second command runs strict configuration/source preflight, builds the
-pinned command, and executes its bounded `--preflight` authenticated private
-query before starting the relay, private Agent Mail service, and bridge with
+The second command runs strict configuration/image preflight and executes the
+pinned image's bounded `--preflight` authenticated private query before
+starting the relay, private Agent Mail service, and bridge with
 `--wait`. It additionally checks `/readyz`, proving the steady-state bridge
 has reconciled successfully after the canonical-Host preflight. Live
 bidirectional acceptance and replay evidence are intentionally provided by the
