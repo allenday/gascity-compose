@@ -11,6 +11,9 @@ services:
       - ./nginx/html:/usr/share/nginx/html:ro
     ports:
       - "${TAILNET_IP:?Set TAILNET_IP in .env}:80:80"
+      # Dev-only public webhook ingress. Bind it only when a host firewall
+      # allows GitHub's webhook CIDRs; use a non-public loopback default.
+      - "${GITHUB_WEBHOOK_WAN_IP:-127.0.0.1}:${GITHUB_WEBHOOK_WAN_PORT:-8088}:80"
       - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GRAFANA_PORT:-3000}:3000"
       - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GITEA_HTTP_PORT:-3002}:3002"
       - "${TAILNET_IP:?Set TAILNET_IP in .env}:${GATUS_PORT:-8081}:8081"
