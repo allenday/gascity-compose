@@ -26,6 +26,29 @@ All mutable state is bind-mounted beneath `./state`; no named Docker volumes are
 After startup, run `make smoke ENV_FILE=.env` to verify the exposed platform endpoints and
 Prometheus scrape targets.
 
+## GitHub documentation-impact worker isolation
+
+Enable the GitHub profile with the App credentials in ignored `.env`:
+
+```bash
+docker compose --profile github-docs-impact up -d --build github-webhook github-admin
+```
+
+The GitHub webhook/admin services are the trusted supervisor: only they receive
+the installation token and only they publish `Gas City / docs-impact` Check
+Runs. The separate `github-docs-patch-worker` is a one-shot, untrusted TechDocs
+producer. Before running it, the supervisor must place a revision-bound,
+sanitized PR snapshot under `state/github-intake/docs-patch-snapshots/`; the
+worker can read that directory and write a proposed artifact only under
+`state/github-intake/docs-patch-artifacts/`.
+
+The worker has no GitHub credentials, no City or intake-rules mount, no host
+port, network access, or a writable root filesystem. It cannot push a branch
+or open a pull request. Run it on an already-written snapshot with
+`docker compose --profile github-docs-impact run --rm github-docs-patch-worker`.
+The supervisor validates any artifact before persistence and turns it into an
+`ACTION_REQUIRED` Check Run; an artifact never makes the check pass by itself.
+
 ## Start the City safely
 
 The `city` service is profile-gated because two supervisors must never reconcile the same mounted

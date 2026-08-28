@@ -3,6 +3,9 @@ version = 1
 # Run the same revision-bound evaluator for every GitHub event that can make a
 # pull request mergeable. The service's durable delivery receipt remains the
 # recovery record; source identity is independently bound to the head SHA.
+# These actions execute in the trusted supervisor. It is the only process that
+# receives the installation token or can publish a GitHub Check Run; the
+# TechDocs worker receives a sanitized snapshot through its isolated outbox.
 [[rule]]
 id = "docs-impact-pr-opened"
 event = "pull_request"

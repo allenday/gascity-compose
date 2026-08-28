@@ -118,6 +118,35 @@ services:
       - ALL
     restart: unless-stopped
 
+  # Untrusted, one-shot TechDocs producer. The trusted GitHub supervisor
+  # materializes a redacted, revision-bound snapshot before this worker runs
+  # and is solely responsible for validating its output and publishing checks.
+  # This service deliberately has no credentials, City/config bind mount, or
+  # host port. Snapshot and artifact directories are separate so the worker
+  # cannot change the supervisor's durable intake state.
+  github-docs-patch-worker:
+    profiles: [github-docs-impact]
+    image: gascity-github-webhook
+    entrypoint: ["python3", "-u", "/opt/gascity-packs/github/scripts/github_intake_docs_patch.py"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot
+      GC_TECHDOCS_ARTIFACT_DIR: /work/artifact
+      HOME: /tmp
+    volumes:
+      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
+      - ./state/github-intake/docs-patch-artifacts:/work/artifact
+    read_only: true
+    network_mode: "none"
+    tmpfs:
+      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
     profiles: [city]

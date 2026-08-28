@@ -12,6 +12,7 @@ require() {
 
 require 'github-webhook:' "$compose"
 require 'github-admin:' "$compose"
+require 'github-docs-patch-worker:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -38,3 +39,37 @@ if awk '/^  github-webhook:/{inside=1; next} inside && /^  [^ ]/{exit} inside &&
   echo 'github-webhook must not publish a host port' >&2
   exit 1
 fi
+
+worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-patch-worker:/{exit}' "$compose")
+[ -n "$worker_block" ] || { echo 'github-docs-patch-worker service block is missing' >&2; exit 1; }
+
+require_worker() {
+  pattern=$1
+  printf '%s\n' "$worker_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-docs-patch-worker" >&2
+    exit 1
+  }
+}
+
+forbid_worker() {
+  pattern=$1
+  if printf '%s\n' "$worker_block" | grep -Eq "$pattern"; then
+    echo "forbidden $pattern in github-docs-patch-worker" >&2
+    exit 1
+  fi
+}
+
+# The untrusted producer gets only the supervisor-created sanitized snapshot
+# plus a dedicated artifact outbox. It cannot receive App credentials, City
+# state/configuration, or a network listener.
+require_worker 'GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot'
+require_worker 'GC_TECHDOCS_ARTIFACT_DIR: /work/artifact'
+require_worker 'docs-patch-snapshots.*:/work/snapshot:ro'
+require_worker 'docs-patch-artifacts.*:/work/artifact'
+require_worker 'read_only: true'
+require_worker 'network_mode: "none"'
+require_worker 'cap_drop:'
+forbid_worker 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
+forbid_worker '\$\{CITY_DIR'
+forbid_worker './config/github-intake'
+forbid_worker '^    ports:'
