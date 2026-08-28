@@ -145,11 +145,13 @@ services:
       GC_TECHDOCS_ADAPTER_COMMAND: ${GC_TECHDOCS_ADAPTER_COMMAND:-}
       GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS: ${GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:-300}
       GC_TECHDOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
+      GC_TECHDOCS_CANDIDATE_DIR: /work/candidate
       HOME: /tmp
     volumes:
       - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
       - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
       - ./state/github-intake/docs-patch-artifacts:/work/artifact
+      - ./state/github-intake/docs-patch-candidates:/work/candidate:ro
     read_only: true
     network_mode: "none"
     tmpfs:
@@ -160,6 +162,51 @@ services:
       - ALL
     # Restarting is safe: queue output is accepted only when its digest matches
     # the revision-bound snapshot, and malformed/stale output is recomputed.
+    restart: unless-stopped
+
+  # Egress is isolated here: cagent gets only the exact-SHA evidence assignment,
+  # vendored review skill, and (if required) a model-scoped token.  It has no
+  # GitHub credential, City state, checkout, tools, or host port.  Its raw
+  # response is validated and enveloped by the separate networkless worker.
+  github-docs-techdocs-reviewer:
+    profiles: [github-docs-impact]
+    image: gascity-github-webhook
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        while :; do
+          for assignment in /work/snapshot/*.json; do
+            test -f "$$assignment" || continue
+            name=$${assignment##*/}
+            review=/work/candidate/$$name
+            test -f "$$review" && continue
+            python3 -u /opt/gascity-packs/github/scripts/github_intake_city_techdocs_adapter.py \
+              --assignment-file "$$assignment" --review-file "$$review" \
+              --skill-dir /opt/gascity-packs/github/skills/developer-experience-techdocs || true
+          done
+          sleep 1
+        done
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      # An invalid default keeps the profile fail-closed while allowing config
+      # validation without local model credentials.
+      GC_TECHDOCS_MODEL_ENDPOINT: ${GC_TECHDOCS_MODEL_ENDPOINT:-http://not-configured.invalid/v1}
+      GC_TECHDOCS_MODEL: ${GC_TECHDOCS_MODEL:-gpt-5.6-terra}
+      GC_TECHDOCS_MODEL_TOKEN: ${GC_TECHDOCS_MODEL_TOKEN:-}
+      TELEMETRY_ENABLED: "false"
+      HOME: /tmp
+    volumes:
+      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
+      - ./state/github-intake/docs-patch-candidates:/work/candidate
+    read_only: true
+    tmpfs:
+      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   # Deliberately profile-gated: never run two supervisors against one city.
