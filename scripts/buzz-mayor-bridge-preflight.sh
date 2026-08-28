@@ -95,22 +95,6 @@ done
   exit 1
 }
 
-source_dir="$(value_for GASCITY_GITEA_DIR)"
-source_dir="${source_dir:-$(value_for GITEA_BRIDGE_DIR)}"
-source_dir="${source_dir:-../gascity-gitea}"
-ref="$(require_value GASCITY_GITEA_REF)"
-printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$' || { printf '%s\n' 'ERROR: GASCITY_GITEA_REF must be a full immutable Git object ID' >&2; exit 1; }
-git -C "$source_dir" diff --quiet && git -C "$source_dir" diff --cached --quiet &&
-  [ -z "$(git -C "$source_dir" status --porcelain --untracked-files=all)" ] &&
-  [ "$(git -C "$source_dir" rev-parse HEAD)" = "$ref" ] || {
-  printf '%s\n' 'ERROR: gascity-gitea checkout must be clean and exactly GASCITY_GITEA_REF' >&2
-  exit 1
-}
-[ -f "$source_dir/cmd/buzz-mayor-bridge/main.go" ] || {
-  printf '%s\n' 'ERROR: GASCITY_GITEA_REF does not provide cmd/buzz-mayor-bridge' >&2
-  exit 1
-}
-
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge config >"$rendered"
@@ -123,12 +107,20 @@ printf '%s\n' "$relay_image" | grep -Eq '^ghcr\.io/block/buzz:sha-[0-9a-f]{7,}@s
   printf '%s\n' 'ERROR: floating Buzz relay image is not allowed' >&2
   exit 1
 }
+bridge_image="$(awk '
+  $0 == "  buzz-mayor-bridge:" { inside = 1; next }
+  inside && /^  [[:alnum:]_-]+:$/ { exit }
+  inside && /^    image: / { sub(/^    image: /, ""); print; exit }
+' "$rendered")"
+expected_bridge_image='ghcr.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:13fda15e66733adf199e3b5d7ea842a2c3397f3a9f40cc97c6c826db49fcc20f'
+[ "$bridge_image" = "$expected_bridge_image" ] || {
+  printf '%s\n' "ERROR: Buzz Mayor bridge image must be $expected_bridge_image" >&2
+  exit 1
+}
 
-# Build the exact pinned core, then execute its bounded signed query before
-# steady-state startup. #48 sends the request to the internal relay while
+# Pull the exact pinned Buzz-owned image, then execute its bounded signed query
+# before steady-state startup. The client sends the request to the internal relay while
 # deriving the canonical public Host only from BUZZ_PUBLIC_RELAY_URL.
-docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
-  build buzz-mayor-bridge
 docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \
   up -d --wait --wait-timeout 120 buzz-relay
 docker compose --env-file "$env_file" --profile buzz --profile buzz-mayor-bridge \

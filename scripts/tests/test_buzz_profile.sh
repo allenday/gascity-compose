@@ -58,6 +58,15 @@ printf '%s\n' "$relay" | grep -Fq '/_liveness' || {
   printf '%s\n' 'Buzz durable dependency services are required' >&2
   exit 1
 }
+if ! awk '
+  $0 == "  buzz-minio-init:" { inside = 1; next }
+  inside && /^  [[:alnum:]_-]+:$/ { exit }
+  inside && /^    entrypoint: \|$/ { found = 1 }
+  END { exit !found }
+' "$root/compose.yaml"; then
+  printf '%s\n' 'buzz-minio-init must use a literal shell block to keep setup commands separate' >&2
+  exit 1
+fi
 
 for service in buzz-postgres buzz-redis buzz-minio buzz-minio-init; do
   block=$(service_block "$service")

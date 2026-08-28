@@ -124,8 +124,8 @@ fi
 # must use the reviewed immutable core revision.
 require 'GITEA__webhook__ALLOWED_HOST_LIST: 127.0.0.1,localhost,woodpecker-server,gitea-mail-bridge' "$rendered"
 require 'GITEA__security__ALLOWED_HOST_LIST: loopback,woodpecker-server,gitea-mail-bridge' "$rendered"
-require 'GASCITY_GITEA_REF: 827d768468a76787655ef46be24679301dc7e217' "$rendered"
-require 'git status --porcelain --untracked-files=all' "$rendered"
+require 'GASCITY_GITEA_REF: b3f17be95941334b48e36b2c90303491761d376c' "$bridge"
+require 'git status --porcelain --untracked-files=all' "$bridge"
 
 # Mayor gets Agent Mail through its role-specific Codex profile. The shared
 # Codex configuration deliberately contains no Agent Mail endpoint.
