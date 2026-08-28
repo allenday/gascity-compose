@@ -118,7 +118,7 @@ services:
       - ALL
     restart: unless-stopped
 
-  # Untrusted, one-shot TechDocs producer. The trusted GitHub supervisor
+  # Untrusted, persistent TechDocs queue consumer. The trusted GitHub supervisor
   # materializes a redacted, revision-bound snapshot before this worker runs
   # and is solely responsible for validating its output and publishing checks.
   # This service deliberately has no credentials, City/config bind mount, or
@@ -151,7 +151,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    restart: "no"
+    # Restarting is safe: queue output is accepted only when its digest matches
+    # the revision-bound snapshot, and malformed/stale output is recomputed.
+    restart: unless-stopped
 
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
