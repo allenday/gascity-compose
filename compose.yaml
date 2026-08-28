@@ -39,6 +39,44 @@ services:
       buzz-relay:
         condition: service_healthy
         required: false
+      github-webhook:
+        condition: service_started
+        required: false
+
+  # GitHub App ingress is opt-in. The worker has no host port: Nginx is the
+  # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
+  github-webhook:
+    profiles: [github-docs-impact]
+    build:
+      context: .
+      dockerfile: Dockerfile.city
+      target: launcher-runtime
+      args:
+        GASCITY_REF: ${GASCITY_REF:-ab54f93c3b3d30bb8f52f7e92c0761fb75340752}
+        GASCITY_REPOSITORY: ${GASCITY_REPOSITORY:-https://github.com/gastownhall/gascity.git}
+        CAGENT_REF: ${CAGENT_REF:-v1.23.0}
+    entrypoint: ["python3", "-u", "/opt/gascity-packs/github/scripts/github_intake_service.py"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      GC_SERVICE_NAME: github-webhook
+      GC_SERVICE_HOST: 0.0.0.0
+      GC_SERVICE_PORT: "8080"
+      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
+      GC_GITHUB_INTAKE_RULES_FILE: /run/github-intake/rules.toml
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+    volumes:
+      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      - ./config/github-intake/rules.toml:/run/github-intake/rules.toml:ro
+      - ./state/github-intake:/var/lib/github-intake
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
 
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
