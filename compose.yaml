@@ -131,15 +131,13 @@ services:
       - /bin/sh
       - -ec
       - |
-        worker=/opt/gascity-packs/github/scripts/github_intake_docs_patch_worker.py
-        test -f "$$worker" || { echo "GitHub pack lacks github_intake_docs_patch_worker.py" >&2; exit 64; }
+        worker=/opt/gascity-packs/github/scripts/github_intake_docs_patch_queue_worker.py
+        test -f "$$worker" || { echo "GitHub pack lacks github_intake_docs_patch_queue_worker.py" >&2; exit 64; }
         exec python3 -u "$$worker"
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot
       GC_TECHDOCS_ARTIFACT_DIR: /work/artifact
-      GC_TECHDOCS_SNAPSHOT_FILE: /work/snapshot/snapshot.json
-      GC_TECHDOCS_ARTIFACT_FILE: /work/artifact/artifact.json
       HOME: /tmp
     volumes:
       - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
