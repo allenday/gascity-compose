@@ -69,6 +69,7 @@ services:
       GC_SERVICE_PORT: "8080"
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
+      HOME: /var/lib/github-intake/home
       GC_GITHUB_INTAKE_RULES_FILE: /run/github-intake/rules.toml
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
@@ -100,6 +101,7 @@ services:
       GC_SERVICE_PORT: "8081"
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
+      HOME: /var/lib/github-intake/home
       GITHUB_INTAKE_ADMIN_PUBLIC_URL: ${GITHUB_INTAKE_ADMIN_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}

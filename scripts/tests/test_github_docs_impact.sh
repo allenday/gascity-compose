@@ -15,6 +15,7 @@ require 'github-admin:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
+require 'HOME: /var/lib/github-intake/home' "$compose"
 require 'GITHUB_WEBHOOK_WAN_IP:-127.0.0.1' "$compose"
 require 'GITHUB_WEBHOOK_WAN_PORT:-8088' "$compose"
 require 'github-webhook:8080' "$root/nginx/nginx.conf"
@@ -28,6 +29,7 @@ require 'action = "synchronize"' "$rules"
 require 'action = "ready_for_review"' "$rules"
 require 'github_intake_docs_impact.py' "$rules"
 require 'github_app_token_env = "GH_TOKEN"' "$rules"
+require 'libicu72' "$root/Dockerfile.city"
 
 # The profile service deliberately has no `ports:` declaration. Its only
 # reachable path is Nginx, which can then be scoped by Tailscale Funnel.

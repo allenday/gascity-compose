@@ -26,7 +26,7 @@ RUN npm install --prefix /out/codex "@openai/codex@${CODEX_VERSION}"
 FROM dolthub/dolt:latest AS dolt
 
 FROM debian:bookworm-slim AS launcher-runtime
-RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git jq python3 tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git jq libicu72 python3 tini && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/gc /usr/local/bin/gc
 COPY --from=build /out/bd /usr/local/bin/bd
 COPY --from=build /out/cagent /usr/local/bin/cagent
