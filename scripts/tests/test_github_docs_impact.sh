@@ -65,6 +65,9 @@ forbid_worker() {
 # state/configuration, or a network listener.
 require_worker 'GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot'
 require_worker 'GC_TECHDOCS_ARTIFACT_DIR: /work/artifact'
+require_worker 'GC_TECHDOCS_ADAPTER_COMMAND:.*GC_TECHDOCS_ADAPTER_COMMAND:-'
+require_worker 'GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:.*GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:-300'
+require_worker 'GC_TECHDOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs'
 require_worker 'github_intake_docs_patch_queue_worker.py'
 require_worker 'test -f "\$\$worker"'
 require_worker 'GitHub pack lacks github_intake_docs_patch_queue_worker.py'

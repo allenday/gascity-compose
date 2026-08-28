@@ -119,8 +119,8 @@ services:
     restart: unless-stopped
 
   # Untrusted, persistent TechDocs queue consumer. The trusted GitHub supervisor
-  # materializes a redacted, revision-bound snapshot before this worker runs
-  # and is solely responsible for validating its output and publishing checks.
+  # materializes a redacted, revision-bound assignment before this worker runs
+  # and is solely responsible for projecting validated output and publishing.
   # This service deliberately has no credentials, City/config bind mount, or
   # host port. Snapshot and artifact directories are separate so the worker
   # cannot change the supervisor's durable intake state.
@@ -138,6 +138,10 @@ services:
     environment:
       GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot
       GC_TECHDOCS_ARTIFACT_DIR: /work/artifact
+      # No runtime is assumed: an unset or unavailable adapter emits no review.
+      GC_TECHDOCS_ADAPTER_COMMAND: ${GC_TECHDOCS_ADAPTER_COMMAND:-}
+      GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS: ${GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:-300}
+      GC_TECHDOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       HOME: /tmp
     volumes:
       - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
