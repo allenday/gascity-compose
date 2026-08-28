@@ -3,7 +3,9 @@
 FROM golang:1.26.6-bookworm AS build
 ARG GASCITY_REF=v1.3.4
 ARG GASCITY_REPOSITORY=https://github.com/gastownhall/gascity.git
-ARG BEADS_VERSION=v1.2.2
+# Keep the standalone bd binary aligned with the Gas City dependency. The
+# City database schema is owned by that revision, not by a generic release.
+ARG BEADS_VERSION=v1.1.1-0.20260805093327-bf97b73749ac
 ARG CAGENT_REF=v1.23.0
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates git libicu-dev pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /src

@@ -30,6 +30,7 @@ require 'action = "ready_for_review"' "$rules"
 require 'github_intake_docs_impact.py' "$rules"
 require 'github_app_token_env = "GH_TOKEN"' "$rules"
 require 'libicu72' "$root/Dockerfile.city"
+require 'BEADS_VERSION=v1.1.1-0.20260805093327-bf97b73749ac' "$root/Dockerfile.city"
 
 # The profile service deliberately has no `ports:` declaration. Its only
 # reachable path is Nginx, which can then be scoped by Tailscale Funnel.
