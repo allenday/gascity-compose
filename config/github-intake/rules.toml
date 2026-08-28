@@ -13,7 +13,7 @@ event = "pull_request"
 action = "opened"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact.py"]
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -23,7 +23,7 @@ event = "pull_request"
 action = "reopened"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact.py"]
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -33,7 +33,7 @@ event = "pull_request"
 action = "synchronize"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact.py"]
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -43,5 +43,5 @@ event = "pull_request"
 action = "ready_for_review"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact.py"]
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
 github_app_token_env = "GH_TOKEN"
