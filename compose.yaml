@@ -42,6 +42,9 @@ services:
       github-webhook:
         condition: service_started
         required: false
+      github-admin:
+        condition: service_started
+        required: false
 
   # GitHub App ingress is opt-in. The worker has no host port: Nginx is the
   # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
@@ -67,10 +70,42 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+      GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
+      GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}
     volumes:
       - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./config/github-intake/rules.toml:/run/github-intake/rules.toml:ro
+      - ./state/github-intake:/var/lib/github-intake
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  # The App manifest/callback surface is Tailnet-only. It shares durable
+  # intake state with the webhook process but has a separate listener, so the
+  # public Funnel can stay constrained to the signed webhook path.
+  github-admin:
+    profiles: [github-docs-impact]
+    image: gascity-github-webhook
+    entrypoint: ["python3", "-u", "/opt/gascity-packs/github/scripts/github_intake_service.py"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      GC_SERVICE_NAME: github-admin
+      GC_SERVICE_HOST: 0.0.0.0
+      GC_SERVICE_PORT: "8081"
+      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
+      GITHUB_INTAKE_ADMIN_PUBLIC_URL: ${GITHUB_INTAKE_ADMIN_PUBLIC_URL:-}
+      GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
+      GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+    volumes:
+      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./state/github-intake:/var/lib/github-intake
     security_opt:
       - no-new-privileges:true

@@ -11,11 +11,14 @@ require() {
 }
 
 require 'github-webhook:' "$compose"
+require 'github-admin:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
 require 'github-webhook:8080' "$root/nginx/nginx.conf"
+require 'github-admin:8081' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
+require 'location \^~ /v0/github/app/' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
 require 'action = "reopened"' "$rules"
 require 'action = "synchronize"' "$rules"
