@@ -64,6 +64,11 @@ forbid_worker() {
 # state/configuration, or a network listener.
 require_worker 'GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot'
 require_worker 'GC_TECHDOCS_ARTIFACT_DIR: /work/artifact'
+require_worker 'GC_TECHDOCS_SNAPSHOT_FILE: /work/snapshot/snapshot.json'
+require_worker 'GC_TECHDOCS_ARTIFACT_FILE: /work/artifact/artifact.json'
+require_worker 'github_intake_docs_patch_worker.py'
+require_worker 'test -f "\$\$worker"'
+require_worker 'GitHub pack lacks github_intake_docs_patch_worker.py'
 require_worker 'docs-patch-snapshots.*:/work/snapshot:ro'
 require_worker 'docs-patch-artifacts.*:/work/artifact'
 require_worker 'read_only: true'

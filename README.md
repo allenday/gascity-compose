@@ -34,13 +34,18 @@ Enable the GitHub profile with the App credentials in ignored `.env`:
 docker compose --profile github-docs-impact up -d --build github-webhook github-admin
 ```
 
+Set `GITHUB_PACK_DIR` to the exact GitHub pack revision that includes
+`github_intake_docs_patch_worker.py`. The worker refuses to start with an
+explicit configuration error if that entrypoint is absent, so an older checkout
+cannot silently turn a worker invocation into a successful no-op.
+
 The GitHub webhook/admin services are the trusted supervisor: only they receive
 the installation token and only they publish `Gas City / docs-impact` Check
 Runs. The separate `github-docs-patch-worker` is a one-shot, untrusted TechDocs
 producer. Before running it, the supervisor must place a revision-bound,
 sanitized PR snapshot under `state/github-intake/docs-patch-snapshots/`; the
-worker can read that directory and write a proposed artifact only under
-`state/github-intake/docs-patch-artifacts/`.
+worker can read `snapshot.json` in that directory and write its canonical
+`artifact.json` only under `state/github-intake/docs-patch-artifacts/`.
 
 The worker has no GitHub credentials, no City or intake-rules mount, no host
 port, network access, or a writable root filesystem. It cannot push a branch
