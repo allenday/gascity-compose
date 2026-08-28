@@ -426,7 +426,7 @@ services:
 
   # One private Buzz channel -> Mayor Agent Mail adapter. It deliberately has
   # no tracker, City, Codex, or Mayor credentials and owns only its replay
-  # ledger. The source checkout must already be the pinned, clean revision.
+  # ledger. It runs the pinned, Buzz-owned immutable image.
   buzz-mayor-bridge:
     profiles: [buzz-mayor-bridge]
     user: "65532:65532"

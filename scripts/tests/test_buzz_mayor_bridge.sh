@@ -111,6 +111,7 @@ require 'buzz-mayor-bridge --preflight' "$root/scripts/buzz-mayor-bridge-preflig
 require '/readyz' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require 'canonical relay host authorities differ' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 require 'floating Buzz relay image' "$root/scripts/buzz-mayor-bridge-preflight.sh"
+require 'ghcr\.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:13fda15e66733adf199e3b5d7ea842a2c3397f3a9f40cc97c6c826db49fcc20f' "$root/scripts/buzz-mayor-bridge-preflight.sh"
 
 require '^buzz-mayor-bridge-bootstrap:' "$root/Makefile"
 require '^buzz-mayor-bridge-up:' "$root/Makefile"

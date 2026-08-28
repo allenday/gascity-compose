@@ -112,8 +112,9 @@ bridge_image="$(awk '
   inside && /^  [[:alnum:]_-]+:$/ { exit }
   inside && /^    image: / { sub(/^    image: /, ""); print; exit }
 ' "$rendered")"
-printf '%s\n' "$bridge_image" | grep -Eq '^ghcr\.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:[0-9a-f]{64}$' || {
-  printf '%s\n' 'ERROR: floating Buzz Mayor bridge image is not allowed' >&2
+expected_bridge_image='ghcr.io/cyberstorm-dev/gascity-buzz-mayor-bridge@sha256:13fda15e66733adf199e3b5d7ea842a2c3397f3a9f40cc97c6c826db49fcc20f'
+[ "$bridge_image" = "$expected_bridge_image" ] || {
+  printf '%s\n' "ERROR: Buzz Mayor bridge image must be $expected_bridge_image" >&2
   exit 1
 }
 
