@@ -71,6 +71,9 @@ services:
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       HOME: /var/lib/github-intake/home
       GC_GITHUB_INTAKE_RULES_FILE: /run/github-intake/rules.toml
+      GC_GITHUB_DOCS_PATCH_SNAPSHOT_DIR: /var/lib/github-intake/docs-patch-snapshots
+      GC_GITHUB_DOCS_PATCH_ARTIFACT_DIR: /var/lib/github-intake/docs-patch-artifacts
+      GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS: ${GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:-305}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}

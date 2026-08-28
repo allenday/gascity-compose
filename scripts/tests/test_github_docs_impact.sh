@@ -43,6 +43,16 @@ fi
 
 worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-patch-worker:/{exit}' "$compose")
 [ -n "$worker_block" ] || { echo 'github-docs-patch-worker service block is missing' >&2; exit 1; }
+webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
+[ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
+
+require_webhook() {
+  pattern=$1
+  printf '%s\n' "$webhook_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-webhook" >&2
+    exit 1
+  }
+}
 
 require_worker() {
   pattern=$1
@@ -81,3 +91,10 @@ forbid_worker 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
 forbid_worker '\$\{CITY_DIR'
 forbid_worker './config/github-intake'
 forbid_worker '^    ports:'
+
+# The trusted rule subprocess shares the exact queue directories, waits longer
+# than the worker's default adapter timeout, and alone receives the token used
+# by the pipeline's projector/publisher.
+require_webhook 'GC_GITHUB_DOCS_PATCH_SNAPSHOT_DIR: /var/lib/github-intake/docs-patch-snapshots'
+require_webhook 'GC_GITHUB_DOCS_PATCH_ARTIFACT_DIR: /var/lib/github-intake/docs-patch-artifacts'
+require_webhook 'GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:.*GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:-305'
