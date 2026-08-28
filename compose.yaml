@@ -166,7 +166,7 @@ services:
 
   # Deliberately profile-gated: never run two supervisors against one city.
   city:
-    profiles: [city]
+    profiles: [city, github-docs-impact]
     # Match the owner of linked city/rig paths so Gas City can maintain their
     # local Dolt mirrors without granting the controller root access.
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
@@ -256,7 +256,7 @@ services:
   ollama:
     # City requires a reachable model service; the models profile remains
     # useful for explicit model pulling through model-init.
-    profiles: [city, models]
+    profiles: [city, models, github-docs-impact]
     image: ollama/ollama:latest
     restart: unless-stopped
     ports:
@@ -270,7 +270,7 @@ services:
       retries: 12
 
   ollama-metrics:
-    profiles: [city]
+    profiles: [city, github-docs-impact]
     build:
       # The fork is checked out locally while the upstream contribution is
       # pending. This stays source-visible and avoids an unpublished image tag.

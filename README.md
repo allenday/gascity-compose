@@ -28,11 +28,17 @@ Prometheus scrape targets.
 
 ## GitHub documentation-impact worker isolation
 
-Enable the GitHub profile with the App credentials in ignored `.env`:
+Enable the complete GitHub profile with the App credentials in ignored `.env`.
+This one profile starts the existing trusted City supervisor, webhook, admin,
+and networkless validator worker together:
 
 ```bash
-docker compose --profile github-docs-impact up -d --build github-webhook github-admin
+docker compose --profile github-docs-impact up -d --build
 ```
+
+Because this profile now includes `city`, stop any host or other Compose City
+supervisor for the same `CITY_DIR` before running it. The profile does not
+create a second supervisor or weaken the single-supervisor rule.
 
 Set `GITHUB_PACK_DIR` to the exact GitHub pack revision that includes
 `github_intake_docs_patch_worker.py`. The worker refuses to start with an
@@ -60,7 +66,7 @@ check pass by itself.
 ## Start the City safely
 
 The `city` service is profile-gated because two supervisors must never reconcile the same mounted
-City. Stop the existing host supervisor first, then start it in Compose:
+City. Stop the existing host supervisor first, then start City alone in Compose:
 
 ```bash
 docker compose --profile city up -d --build

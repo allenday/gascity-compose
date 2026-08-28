@@ -142,6 +142,17 @@ if grep -Eq 'GC_TECHDOCS_MODEL_(TOKEN|ENDPOINT)|github_docs_model_egress_proxy|g
   exit 1
 fi
 
+# One profile activates the complete trusted review path. City remains
+# profile-gated, so this does not weaken the one-supervisor-at-a-time guard.
+require '^    profiles: \[city, github-docs-impact\]$' "$compose"
+profile_services=$(docker compose --env-file "$root/.env.example" --profile github-docs-impact config --services)
+for expected in city github-webhook github-admin github-docs-patch-worker; do
+  printf '%s\n' "$profile_services" | grep -Fx "$expected" >/dev/null || {
+    echo "github-docs-impact profile does not activate $expected" >&2
+    exit 1
+  }
+done
+
 # The trusted rule subprocess shares the exact queue directories, waits longer
 # than the worker's default adapter timeout, and alone receives the token used
 # by the pipeline's projector/publisher.
