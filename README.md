@@ -53,7 +53,7 @@ supervisor for the same `CITY_DIR` before running it. The profile does not
 create a second supervisor or weaken the single-supervisor rule.
 
 Set `GITHUB_PACK_DIR` to the exact GitHub pack revision that includes
-`github_intake_docs_patch_worker.py`. The worker refuses to start with an
+`github_intake_docs_patch_queue_worker.py`. The worker refuses to start with an
 explicit configuration error if that entrypoint is absent, so an older checkout
 cannot silently turn a worker invocation into a successful no-op.
 
