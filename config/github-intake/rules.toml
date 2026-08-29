@@ -1,0 +1,48 @@
+version = 1
+
+# Run the same revision-bound evaluator for every GitHub event that can make a
+# pull request mergeable. The service's durable delivery receipt remains the
+# recovery record; source identity is independently bound to the head SHA.
+# These actions execute in the trusted supervisor. It is the only process that
+# receives the installation token or can publish a GitHub Check Run. Each rule
+# queues an assignment, waits for the isolated worker's exact outbox candidate,
+# then validates, projects, and publishes it through the trusted pipeline.
+[[rule]]
+id = "docs-impact-pr-opened"
+event = "pull_request"
+[rule.match]
+action = "opened"
+[[rule.action]]
+type = "command"
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+github_app_token_env = "GH_TOKEN"
+
+[[rule]]
+id = "docs-impact-pr-reopened"
+event = "pull_request"
+[rule.match]
+action = "reopened"
+[[rule.action]]
+type = "command"
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+github_app_token_env = "GH_TOKEN"
+
+[[rule]]
+id = "docs-impact-pr-synchronize"
+event = "pull_request"
+[rule.match]
+action = "synchronize"
+[[rule.action]]
+type = "command"
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+github_app_token_env = "GH_TOKEN"
+
+[[rule]]
+id = "docs-impact-pr-ready-for-review"
+event = "pull_request"
+[rule.match]
+action = "ready_for_review"
+[[rule.action]]
+type = "command"
+command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+github_app_token_env = "GH_TOKEN"

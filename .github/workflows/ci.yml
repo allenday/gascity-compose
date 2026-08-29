@@ -15,6 +15,7 @@ jobs:
           CITY_DIR: ${{ github.workspace }}/fixture-city
           MY_PROJECT_DIR: ${{ github.workspace }}/fixture-my-project
           GASCITY_SOURCE_DIR: ${{ github.workspace }}/fixture-gascity
+          GITHUB_PACK_DIR: ${{ github.workspace }}/fixture-github-pack
           CODEX_AUTH_FILE: ${{ github.workspace }}/fixture-codex-auth.json
           GASCITY_MCP_DIR: ${{ github.workspace }}
           GITEA_BRIDGE_DIR: ${{ github.workspace }}
@@ -44,11 +45,13 @@ jobs:
           BUZZ_S3_SECRET_KEY: ci-only-not-an-s3-secret
         run: |
           docker compose config --quiet
-          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge --profile buzz --profile buzz-mayor-bridge config --quiet
+          docker compose --profile city --profile models --profile mcp --profile gitea-mcp --profile gitea-bridge --profile buzz --profile buzz-mayor-bridge --profile github-docs-impact config --quiet
       - name: Validate private Buzz relay contract
         run: sh scripts/tests/test_buzz_profile.sh
       - name: Validate isolated Buzz Mayor bridge contract
         run: sh scripts/tests/test_buzz_mayor_bridge.sh
+      - name: Validate GitHub docs-impact gate contract
+        run: sh scripts/tests/test_github_docs_impact.sh
       - name: Build the local adapter image
         run: docker build --tag gascity-role-health:ci role-health
       - name: Check the smoke script parses
