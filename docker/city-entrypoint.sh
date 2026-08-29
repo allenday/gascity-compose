@@ -54,8 +54,8 @@ fi
 # checkout used by the intake services. Only the trusted City imports it; the
 # public webhook and networkless evidence worker never receive Codex auth.
 if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
-   ! grep -Eq '^[[:space:]]*\[imports\.github\][[:space:]]*$' "$CITY_PATH/pack.toml"; then
-  gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github
+   ! grep -Eq '^[[:space:]]*\[imports\.github-docs-impact\][[:space:]]*$' "$CITY_PATH/pack.toml"; then
+  gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact
 fi
 
 # The city lockfile pins remote packs but the controller cache lives in the

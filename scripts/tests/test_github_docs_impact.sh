@@ -19,8 +19,8 @@ require 'GC_SERVICE_PORT: "8080"' "$compose"
 require 'HOME: /var/lib/github-intake/home' "$compose"
 require 'GITHUB_WEBHOOK_WAN_IP:-127.0.0.1' "$compose"
 require 'GITHUB_WEBHOOK_WAN_PORT:-8088' "$compose"
-require 'github-webhook:8080' "$root/nginx/nginx.conf"
-require 'github-admin:8081' "$root/nginx/nginx.conf"
+require 'city:8080' "$root/nginx/nginx.conf"
+require 'city:8081' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'location = /v0/github/admin' "$root/nginx/nginx.conf"
 require 'location \^~ /v0/github/admin/' "$root/nginx/nginx.conf"
@@ -45,6 +45,8 @@ worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} insi
 [ -n "$worker_block" ] || { echo 'github-docs-patch-worker service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
+admin_block=$(awk '/^  github-admin:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-admin:/{exit}' "$compose")
+[ -n "$admin_block" ] || { echo 'github-admin service block is missing' >&2; exit 1; }
 reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
 egress_block=$(awk '/^  github-docs-model-egress:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-model-egress:/{exit}' "$compose")
 city_block=$(awk '/^  city:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  city:/{exit}' "$compose")
@@ -56,6 +58,14 @@ require_webhook() {
   pattern=$1
   printf '%s\n' "$webhook_block" | grep -Eq "$pattern" || {
     echo "missing $pattern in github-webhook" >&2
+    exit 1
+  }
+}
+
+require_admin() {
+  pattern=$1
+  printf '%s\n' "$admin_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-admin" >&2
     exit 1
   }
 }
@@ -119,7 +129,7 @@ forbid_city() {
 # copies, and returns digest-bound candidates to the networkless validator.
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
-require_city 'GC_CITY_DOCS_REVIEW_TARGET: github.docs-impact-reviewer'
+require_city 'GC_CITY_DOCS_REVIEW_TARGET: github-docs-impact.docs-impact-reviewer'
 require_city 'docs-patch-snapshots.*:/var/lib/github-docs-impact/snapshot:ro'
 require_city 'docs-patch-candidates.*:/var/lib/github-docs-impact/candidate'
 require_city 'docs-review-immutable.*:/var/lib/github-docs-impact/immutable'
@@ -159,3 +169,9 @@ done
 require_webhook 'GC_GITHUB_DOCS_PATCH_SNAPSHOT_DIR: /var/lib/github-intake/docs-patch-snapshots'
 require_webhook 'GC_GITHUB_DOCS_PATCH_ARTIFACT_DIR: /var/lib/github-intake/docs-patch-artifacts'
 require_webhook 'GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:.*GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:-305'
+require_webhook 'network_mode: "service:city"'
+require_webhook 'GC_HOME: /root/.gc'
+require_webhook 'state/gc-runtime:/root/.gc'
+require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
+require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
+require_admin 'network_mode: "service:city"'

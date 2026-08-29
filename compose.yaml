@@ -53,6 +53,10 @@ services:
   # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
   github-webhook:
     profiles: [github-docs-impact]
+    # The trusted intake service performs revision-source Beads operations.
+    # Share City's loopback namespace so its existing gc --city invocation
+    # reaches the City-owned Dolt server; no City credential enters this service.
+    network_mode: "service:city"
     build:
       context: .
       dockerfile: Dockerfile.city
@@ -68,6 +72,11 @@ services:
       GC_SERVICE_HOST: 0.0.0.0
       GC_SERVICE_PORT: "8080"
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      # Use the City's managed runtime registry for gc bd, including the
+      # already-running scoped Dolt server in this shared network namespace.
+      GC_HOME: /root/.gc
+      BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
+      GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       HOME: /var/lib/github-intake/home
       GC_GITHUB_INTAKE_RULES_FILE: /run/github-intake/rules.toml
@@ -77,6 +86,7 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+      GITHUB_INTAKE_ADMIN_PUBLIC_URL: ${GITHUB_INTAKE_ADMIN_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}
     volumes:
@@ -84,6 +94,7 @@ services:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./config/github-intake/rules.toml:/run/github-intake/rules.toml:ro
       - ./state/github-intake:/var/lib/github-intake
+      - ./state/gc-runtime:/root/.gc
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -95,6 +106,9 @@ services:
   # public Funnel can stay constrained to the signed webhook path.
   github-admin:
     profiles: [github-docs-impact]
+    # Keep the public evidence reader with the trusted publisher's City-local
+    # Beads access while Nginx remains its only externally routable hop.
+    network_mode: "service:city"
     image: gascity-github-webhook
     entrypoint: ["python3", "-u", "/opt/gascity-packs/github/scripts/github_intake_service.py"]
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
@@ -179,8 +193,10 @@ services:
         GASCITY_REPOSITORY: ${GASCITY_REPOSITORY:-https://github.com/gastownhall/gascity.git}
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
-      GC_HOME: /var/lib/gascity
-      HOME: /var/lib/gascity/home
+      GC_HOME: /root/.gc
+      # gc's platform supervisor requires the container user's real HOME;
+      # GC_HOME remains the isolated runtime state location.
+      HOME: /root
       CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       CITY_NAME: ${CITY_NAME:-my-city}
       GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
@@ -216,7 +232,7 @@ services:
       # Review sanitized exact-SHA evidence through this already-authenticated
       # trusted City. The reviewer has no GitHub credential or publisher path.
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
-      GC_CITY_DOCS_REVIEW_TARGET: github.docs-impact-reviewer
+      GC_CITY_DOCS_REVIEW_TARGET: github-docs-impact.docs-impact-reviewer
       GC_CITY_DOCS_SNAPSHOT_DIR: /var/lib/github-docs-impact/snapshot
       GC_CITY_DOCS_IMMUTABLE_DIR: /var/lib/github-docs-impact/immutable
       GC_CITY_DOCS_CANDIDATE_DIR: /var/lib/github-docs-impact/candidate
@@ -239,7 +255,7 @@ services:
       - ./state/github-intake/docs-patch-candidates:/var/lib/github-docs-impact/candidate
       - ./state/github-intake/docs-review-immutable:/var/lib/github-docs-impact/immutable
       - ./state/github-intake/docs-review-dispatch:/var/lib/github-docs-impact/dispatch
-      - ./state/gc-runtime:/var/lib/gascity
+      - ./state/gc-runtime:/root/.gc
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
       # which copies the read-only host credential into this ephemeral home.
