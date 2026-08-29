@@ -1,7 +1,7 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke buzz-up buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight buzz-mayor-bridge-up buzz-mayor-bridge-smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap up down smoke github-docs-impact-preflight buzz-up buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight buzz-mayor-bridge-up buzz-mayor-bridge-smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
@@ -17,6 +17,9 @@ down:
 
 smoke:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/smoke.sh
+
+github-docs-impact-preflight:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/github-docs-impact-preflight.sh
 
 buzz-up:
 	$(COMPOSE) --profile buzz up -d --wait --wait-timeout 120
@@ -91,6 +94,7 @@ test:
 	sh ./scripts/tests/test_buzz_profile.sh
 	sh ./scripts/tests/test_buzz_mayor_bridge.sh
 	sh ./scripts/tests/test_github_docs_impact.sh
+	sh ./scripts/tests/test_github_docs_impact_preflight.sh
 	sh ./scripts/tests/test_woodpecker_fixture.sh
 	sh ./scripts/tests/test_gitea_mail_bridge.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py

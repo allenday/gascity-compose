@@ -53,9 +53,10 @@ services:
   # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
   github-webhook:
     profiles: [github-docs-impact]
-    # The trusted intake service performs revision-source Beads operations.
-    # Share City's loopback namespace so its existing gc --city invocation
-    # reaches the City-owned Dolt server; no City credential enters this service.
+    # Development compatibility shim: the trusted intake service performs
+    # revision-source Beads operations through City's loopback namespace and
+    # its managed Dolt server. Replace this direct pinned-bd route with a City
+    # work API before treating the deployment as portable or customer-ready.
     network_mode: "service:city"
     build:
       context: .
@@ -90,7 +91,7 @@ services:
       GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}
     volumes:
-      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./config/github-intake/rules.toml:/run/github-intake/rules.toml:ro
       - ./state/github-intake:/var/lib/github-intake
@@ -126,7 +127,7 @@ services:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
     volumes:
-      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./state/github-intake:/var/lib/github-intake
     security_opt:
@@ -162,7 +163,7 @@ services:
       GC_TECHDOCS_CANDIDATE_DIR: /work/candidate
       HOME: /tmp
     volumes:
-      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
       - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
       - ./state/github-intake/docs-patch-artifacts:/work/artifact
       - ./state/github-intake/docs-patch-candidates:/work/candidate:ro
@@ -245,7 +246,7 @@ services:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}:${MY_PROJECT_DIR:?Set MY_PROJECT_DIR in .env to the linked rig path}
       - ${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}:${GASCITY_SOURCE_DIR:?Set GASCITY_SOURCE_DIR in .env to the Gas City source rig}
-      - ${GITHUB_PACK_DIR:-../gascity-packs}:/opt/gascity-packs:ro
+      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
       - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in .env to the host Codex auth file}:/run/secrets/codex-auth.json:ro
       - ./codex:/run/secrets/codex-config:ro
       - ./state/city-mail-secrets:/run/secrets/city-mail:ro

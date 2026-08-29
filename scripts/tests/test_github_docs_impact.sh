@@ -19,6 +19,11 @@ require 'GC_SERVICE_PORT: "8080"' "$compose"
 require 'HOME: /var/lib/github-intake/home' "$compose"
 require 'GITHUB_WEBHOOK_WAN_IP:-127.0.0.1' "$compose"
 require 'GITHUB_WEBHOOK_WAN_PORT:-8088' "$compose"
+if grep -Fq '${GITHUB_PACK_DIR:-' "$compose"; then
+  echo 'github docs-impact mounts must not fall back to a sibling pack checkout' >&2
+  exit 1
+fi
+require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub pack checkout' "$compose"
 require 'city:8080' "$root/nginx/nginx.conf"
 require 'city:8081' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
