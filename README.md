@@ -29,20 +29,9 @@ Prometheus scrape targets.
 ## GitHub documentation-impact worker isolation
 
 Enable the complete GitHub profile with the initial App credentials in ignored
-`.env` or an already-imported protected intake state. Before starting it, set
-`GITHUB_PACK_DIR` to an absolute pack checkout and
-`GITHUB_INTAKE_ADMIN_PUBLIC_URL` to the HTTPS URL where reviewers can open the
-City evidence page. Validate those prerequisites with:
-
-```bash
-make github-docs-impact-preflight ENV_FILE=.env
-```
-
-The preflight verifies the Compose route, pack entrypoints, and either the
-initial `.env` credentials or the imported credentials in
-`state/github-intake/data/config.json`. This one profile starts the existing
-trusted City supervisor, webhook, admin, and networkless validator worker
-together:
+`.env` or an already-imported protected intake state. This one profile starts
+the existing trusted City supervisor, webhook, admin, and networkless validator
+worker together:
 
 ```bash
 docker compose --profile github-docs-impact up -d --build
