@@ -71,8 +71,4 @@ if [ "${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-local-launch &
 fi
 
-if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
-  python3 -u /opt/gascity-packs/github/scripts/github_intake_city_docs_launcher.py &
-fi
-
 exec gc supervisor run

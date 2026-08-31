@@ -81,20 +81,21 @@ services:
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       HOME: /var/lib/github-intake/home
       GC_GITHUB_INTAKE_RULES_FILE: /run/github-intake/rules.toml
-      GC_GITHUB_DOCS_PATCH_SNAPSHOT_DIR: /var/lib/github-intake/docs-patch-snapshots
-      GC_GITHUB_DOCS_PATCH_ARTIFACT_DIR: /var/lib/github-intake/docs-patch-artifacts
-      # City sessions can be restarted or delayed on small development hosts.
-      # Keep the revision-bound handoff alive long enough to publish a completed
-      # review, while never creating a Check Run before one exists.
-      GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS: ${GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:-900}
+      # The adapter records a run before it dispatches an immutable assignment.
+      # Its separate runtime loop accepts candidates and reconciles restarts.
+      GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
+      GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
+      GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
       GITHUB_INTAKE_ADMIN_PUBLIC_URL: ${GITHUB_INTAKE_ADMIN_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_PUBLIC_URL: ${GITHUB_INTAKE_WEBHOOK_PUBLIC_URL:-}
       GITHUB_INTAKE_WEBHOOK_HOOK_URL: ${GITHUB_INTAKE_WEBHOOK_HOOK_URL:-}
     volumes:
       - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
+      - ./:/opt/gascity-compose:ro
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ./config/github-intake/rules.toml:/run/github-intake/rules.toml:ro
       - ./state/github-intake:/var/lib/github-intake
@@ -139,47 +140,37 @@ services:
       - ALL
     restart: unless-stopped
 
-  # Untrusted, persistent TechDocs queue consumer. The trusted GitHub supervisor
-  # materializes a redacted, revision-bound assignment before this worker runs
-  # and is solely responsible for projecting validated output and publishing.
-  # This service deliberately has no credentials, City/config bind mount, or
-  # host port. Snapshot and artifact directories are separate so the worker
-  # cannot change the supervisor's durable intake state.
-  github-docs-patch-worker:
+  # Deployment adapter for the self-contained reviewer. It owns no listener:
+  # the authenticated webhook service invokes `intake --once`; this loop
+  # accepts City candidates and reconciles interrupted durable runs.
+  github-docs-review-runtime:
     profiles: [github-docs-impact]
     image: gascity-github-webhook
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        worker=/opt/gascity-packs/github/scripts/github_intake_docs_patch_queue_worker.py
-        test -f "$$worker" || { echo "GitHub pack lacks github_intake_docs_patch_queue_worker.py" >&2; exit 64; }
-        exec python3 -u "$$worker"
+    entrypoint: ["python3", "-u", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "reconcile", "--loop"]
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
-      GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot
-      GC_TECHDOCS_ARTIFACT_DIR: /work/artifact
-      # No runtime is assumed: an unset or unavailable adapter emits no review.
-      GC_TECHDOCS_ADAPTER_COMMAND: ${GC_TECHDOCS_ADAPTER_COMMAND:-}
-      GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS: ${GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:-300}
-      GC_TECHDOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
-      GC_TECHDOCS_CANDIDATE_DIR: /work/candidate
-      HOME: /tmp
+      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      GC_HOME: /root/.gc
+      GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
+      GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
+      GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
+      GC_GITHUB_DOCS_RECONCILE_SECONDS: ${GC_GITHUB_DOCS_RECONCILE_SECONDS:-15}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      HOME: /var/lib/github-intake/home
     volumes:
       - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ./state/github-intake/docs-patch-snapshots:/work/snapshot:ro
-      - ./state/github-intake/docs-patch-artifacts:/work/artifact
-      - ./state/github-intake/docs-patch-candidates:/work/candidate:ro
-    read_only: true
-    network_mode: "none"
-    tmpfs:
-      - /tmp:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=0700
+      - ./:/opt/gascity-compose:ro
+      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
+      - ./state/github-intake:/var/lib/github-intake
+      - ./state/gc-runtime:/root/.gc
+    network_mode: "service:city"
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    # Restarting is safe: queue output is accepted only when its digest matches
-    # the revision-bound snapshot, and malformed/stale output is recomputed.
     restart: unless-stopped
 
   # Deliberately profile-gated: never run two supervisors against one city.
@@ -237,10 +228,7 @@ services:
       # trusted City. The reviewer has no GitHub credential or publisher path.
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
       GC_CITY_DOCS_REVIEW_TARGET: github-docs-impact.docs-impact-reviewer
-      GC_CITY_DOCS_SNAPSHOT_DIR: /var/lib/github-docs-impact/snapshot
-      GC_CITY_DOCS_IMMUTABLE_DIR: /var/lib/github-docs-impact/immutable
-      GC_CITY_DOCS_CANDIDATE_DIR: /var/lib/github-docs-impact/candidate
-      GC_CITY_DOCS_DISPATCH_DIR: /var/lib/github-docs-impact/dispatch
+      GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
@@ -255,10 +243,7 @@ services:
       - ./state/city-mail-secrets:/run/secrets/city-mail:ro
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
-      - ./state/github-intake/docs-patch-snapshots:/var/lib/github-docs-impact/snapshot:ro
-      - ./state/github-intake/docs-patch-candidates:/var/lib/github-docs-impact/candidate
-      - ./state/github-intake/docs-review-immutable:/var/lib/github-docs-impact/immutable
-      - ./state/github-intake/docs-review-dispatch:/var/lib/github-docs-impact/dispatch
+      - ./state/github-intake/docs-review:/var/lib/github-docs-impact/review
       - ./state/gc-runtime:/root/.gc
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,

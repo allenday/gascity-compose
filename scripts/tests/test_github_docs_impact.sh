@@ -12,7 +12,7 @@ require() {
 
 require 'github-webhook:' "$compose"
 require 'github-admin:' "$compose"
-require 'github-docs-patch-worker:' "$compose"
+require 'github-docs-review-runtime:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -34,7 +34,7 @@ require 'action = "opened"' "$rules"
 require 'action = "reopened"' "$rules"
 require 'action = "synchronize"' "$rules"
 require 'action = "ready_for_review"' "$rules"
-require 'github_intake_docs_impact_pipeline.py' "$rules"
+require 'github_docs_impact_compose_adapter.py", "intake", "--once' "$rules"
 require 'github_app_token_env = "GH_TOKEN"' "$rules"
 require 'libicu72' "$root/Dockerfile.city"
 require 'BEADS_VERSION=v1.1.1-0.20260805093327-bf97b73749ac' "$root/Dockerfile.city"
@@ -46,8 +46,8 @@ if awk '/^  github-webhook:/{inside=1; next} inside && /^  [^ ]/{exit} inside &&
   exit 1
 fi
 
-worker_block=$(awk '/^  github-docs-patch-worker:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-patch-worker:/{exit}' "$compose")
-[ -n "$worker_block" ] || { echo 'github-docs-patch-worker service block is missing' >&2; exit 1; }
+runtime_block=$(awk '/^  github-docs-review-runtime:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-review-runtime:/{exit}' "$compose")
+[ -n "$runtime_block" ] || { echo 'github-docs-review-runtime service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
 admin_block=$(awk '/^  github-admin:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-admin:/{exit}' "$compose")
@@ -75,43 +75,31 @@ require_admin() {
   }
 }
 
-require_worker() {
+require_runtime() {
   pattern=$1
-  printf '%s\n' "$worker_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-docs-patch-worker" >&2
+  printf '%s\n' "$runtime_block" | grep -Eq "$pattern" || {
+    echo "missing $pattern in github-docs-review-runtime" >&2
     exit 1
   }
 }
 
-forbid_worker() {
+forbid_runtime() {
   pattern=$1
-  if printf '%s\n' "$worker_block" | grep -Eq "$pattern"; then
-    echo "forbidden $pattern in github-docs-patch-worker" >&2
+  if printf '%s\n' "$runtime_block" | grep -Eq "$pattern"; then
+    echo "forbidden $pattern in github-docs-review-runtime" >&2
     exit 1
   fi
 }
 
-# The untrusted producer gets only the supervisor-created sanitized snapshot
-# plus a dedicated artifact outbox. It cannot receive App credentials, City
-# state/configuration, or a network listener.
-require_worker 'GC_TECHDOCS_SNAPSHOT_DIR: /work/snapshot'
-require_worker 'GC_TECHDOCS_ARTIFACT_DIR: /work/artifact'
-require_worker 'GC_TECHDOCS_ADAPTER_COMMAND:.*GC_TECHDOCS_ADAPTER_COMMAND:-'
-require_worker 'GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:.*GC_TECHDOCS_ADAPTER_TIMEOUT_SECONDS:-300'
-require_worker 'GC_TECHDOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs'
-require_worker 'github_intake_docs_patch_queue_worker.py'
-require_worker 'test -f "\$\$worker"'
-require_worker 'GitHub pack lacks github_intake_docs_patch_queue_worker.py'
-require_worker 'docs-patch-snapshots.*:/work/snapshot:ro'
-require_worker 'docs-patch-artifacts.*:/work/artifact'
-require_worker 'read_only: true'
-require_worker 'network_mode: "none"'
-require_worker 'cap_drop:'
-require_worker 'restart: unless-stopped'
-forbid_worker 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
-forbid_worker '\$\{CITY_DIR'
-forbid_worker './config/github-intake'
-forbid_worker '^    ports:'
+# The runtime owns the durable record, GitHub App projection, candidate bridge,
+# and reconciliation. It has no listener; webhook ingress remains separate.
+require_runtime 'github_docs_impact_compose_adapter.py.*reconcile.*--loop'
+require_runtime 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
+require_runtime 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
+require_runtime 'network_mode: "service:city"'
+require_runtime 'restart: unless-stopped'
+forbid_runtime '^    ports:'
 
 require_city() {
   pattern=$1
@@ -130,19 +118,18 @@ forbid_city() {
 }
 
 # Codex authentication stays in the already-trusted City runtime. The City
-# queue launcher sees sanitized snapshots read-only, creates immutable local
-# copies, and returns digest-bound candidates to the networkless validator.
+# receives the persisted immutable assignment only after the runtime records it.
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET: github-docs-impact.docs-impact-reviewer'
-require_city 'docs-patch-snapshots.*:/var/lib/github-docs-impact/snapshot:ro'
-require_city 'docs-patch-candidates.*:/var/lib/github-docs-impact/candidate'
-require_city 'docs-review-immutable.*:/var/lib/github-docs-impact/immutable'
-require_city 'docs-review-dispatch.*:/var/lib/github-docs-impact/dispatch'
+require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 forbid_city 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
 
-require 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.sh"
+if grep -Fq 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.sh"; then
+  echo 'retired City docs launcher must be absent' >&2
+  exit 1
+fi
 require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-cost-safe.toml"
 require 'gpt-5\.6-terra' "$root/config/city-cost-safe.toml"
@@ -161,19 +148,18 @@ fi
 # profile-gated, so this does not weaken the one-supervisor-at-a-time guard.
 require '^    profiles: \[city, github-docs-impact\]$' "$compose"
 profile_services=$(docker compose --env-file "$root/.env.example" --profile github-docs-impact config --services)
-for expected in city github-webhook github-admin github-docs-patch-worker; do
+for expected in city github-webhook github-admin github-docs-review-runtime; do
   printf '%s\n' "$profile_services" | grep -Fx "$expected" >/dev/null || {
     echo "github-docs-impact profile does not activate $expected" >&2
     exit 1
   }
 done
 
-# The trusted rule subprocess shares the exact queue directories, waits longer
-# than the worker's default adapter timeout, and alone receives the token used
-# by the pipeline's projector/publisher.
-require_webhook 'GC_GITHUB_DOCS_PATCH_SNAPSHOT_DIR: /var/lib/github-intake/docs-patch-snapshots'
-require_webhook 'GC_GITHUB_DOCS_PATCH_ARTIFACT_DIR: /var/lib/github-intake/docs-patch-artifacts'
-require_webhook 'GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:.*GC_GITHUB_DOCS_REVIEW_WAIT_SECONDS:-900'
+# The authenticated webhook rule builds complete paginated evidence, persists
+# the run, and asks the runtime adapter to dispatch only after that record.
+require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
+require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
 require_webhook 'network_mode: "service:city"'
 require_webhook 'GC_HOME: /root/.gc'
 require_webhook 'state/gc-runtime:/root/.gc'

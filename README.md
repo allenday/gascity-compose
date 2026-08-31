@@ -26,13 +26,13 @@ All mutable state is bind-mounted beneath `./state`; no named Docker volumes are
 After startup, run `make smoke ENV_FILE=.env` to verify the exposed platform endpoints and
 Prometheus scrape targets.
 
-## GitHub documentation-impact worker isolation
+## GitHub documentation-impact smoke adapter
 
 Enable the complete GitHub profile with the initial App credentials in ignored
 `.env` or an already-imported protected intake state. Before starting it, set
 `GITHUB_PACK_DIR` to an absolute pack checkout and
-`GITHUB_INTAKE_ADMIN_PUBLIC_URL` to the HTTPS URL where reviewers can open the
-City evidence page. Validate those prerequisites with:
+`GITHUB_INTAKE_ADMIN_PUBLIC_URL` to the Tailnet-only App setup URL. Validate
+those prerequisites with:
 
 ```bash
 make github-docs-impact-preflight ENV_FILE=.env
@@ -40,9 +40,8 @@ make github-docs-impact-preflight ENV_FILE=.env
 
 The preflight verifies the Compose route, pack entrypoints, and either the
 initial `.env` credentials or the imported credentials in
-`state/github-intake/data/config.json`. This one profile starts the existing
-trusted City supervisor, webhook, admin, and networkless validator worker
-together:
+`state/github-intake/data/config.json`. This profile starts the City, signed
+webhook/admin service, and local runtime adapter together:
 
 ```bash
 docker compose --profile github-docs-impact up -d --build
@@ -52,28 +51,14 @@ Because this profile now includes `city`, stop any host or other Compose City
 supervisor for the same `CITY_DIR` before running it. The profile does not
 create a second supervisor or weaken the single-supervisor rule.
 
-Set `GITHUB_PACK_DIR` to the exact GitHub pack revision that includes
-`github_intake_docs_patch_queue_worker.py`. The worker refuses to start with an
-explicit configuration error if that entrypoint is absent, so an older checkout
-cannot silently turn a worker invocation into a successful no-op.
-
-The GitHub webhook/admin services are the trusted supervisor: only they receive
-the installation token and only they publish `Gas City / docs-impact` Check
-Runs. The trusted `city` service reads revision-bound sanitized PR snapshots
-from `state/github-intake/docs-patch-snapshots/`, copies each to an immutable
-digest-addressed input, and slings one review bead to
-`github.docs-impact-reviewer`. That agent uses the City's existing Codex auth,
-fixed `gpt-5.6-terra`/medium configuration, and vendored TechDocs skill. It has
-no GitHub credential or publishing authority and writes only a digest-bound raw
-candidate under `state/github-intake/docs-patch-candidates/`.
-
-The persistent `github-docs-patch-worker` is networkless and validator-only. It
-has no GitHub credentials, Codex auth, City/config mount, host port, network
-access, or writable root filesystem. It verifies the candidate's exact snapshot
-digest, identity, schema, evidence, and skill before writing the trusted bridge
-envelope under `state/github-intake/docs-patch-artifacts/`. The supervisor then
-validates that envelope again before publishing; a candidate never makes a
-check pass by itself.
+The signed webhook reads every GitHub PR-files page and creates one exact,
+SHA-bound assignment. The runtime first saves its durable lifecycle record,
+then creates and slings an immutable City review task. The reviewer has no
+GitHub credential; it writes a candidate envelope to the shared review outbox.
+The runtime validates that envelope, uses the App credentials to publish the
+compact Check Run or App-owned follow-up PR, and periodically reconciles
+interrupted runs. No proposal diff or deployment-admin page is linked from
+GitHub.
 
 ## Start the City safely
 
