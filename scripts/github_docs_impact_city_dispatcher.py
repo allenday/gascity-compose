@@ -120,6 +120,7 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
         return None
     compact = "".join(output.splitlines())
     decoder = json.JSONDecoder()
+    review: dict[str, object] | None = None
     for index, char in enumerate(compact):
         if char != "{":
             continue
@@ -128,8 +129,8 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict) and value.get("kind") == "github-pr-docs-impact-review":
-            return value
-    return None
+            review = value
+    return review
 
 
 def export_transcripts() -> list[str]:
