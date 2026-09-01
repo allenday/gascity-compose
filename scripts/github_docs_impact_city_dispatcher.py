@@ -160,6 +160,9 @@ def export_transcripts() -> list[str]:
             if result.returncode: continue
             review = _review_from_peek(json.loads(result.stdout))
             if review is None: continue
+            identity = review.get("identity")
+            if not isinstance(identity, dict) or identity.get("source_key") != marker_json["source_key"]:
+                continue
             transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
             exported.append(marker_path.stem)
