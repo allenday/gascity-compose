@@ -186,6 +186,7 @@ services:
       # Review sanitized exact-SHA evidence through this already-authenticated
       # trusted City. The reviewer has no GitHub credential or publisher path.
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
+      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       GC_CITY_DOCS_REVIEW_TARGET: gascity/github-docs-impact.docs-impact-reviewer
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs

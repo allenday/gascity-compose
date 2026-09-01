@@ -54,13 +54,13 @@ fi
 # checkout used by the intake services. Only the trusted City imports it; the
 # public webhook and networkless evidence worker never receive Codex auth.
 if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
-   ! grep -Eq '^[[:space:]]*\[imports\.github-docs-impact\][[:space:]]*$' "$CITY_PATH/pack.toml"; then
-  gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact
+   ! grep -Eq '^[[:space:]]*\[imports\.github-docs-impact\][[:space:]]*$' "$GC_CITY_DOCS_REVIEW_RIG_DIR/pack.toml"; then
+  gc --city "$CITY_PATH" --rig "$GC_CITY_DOCS_REVIEW_RIG_DIR" import add /opt/gascity-packs/github --name github-docs-impact
 fi
 
 # Materialize imported agents before applying the provider patch below.  A
 # fresh City has no merged reviewer definition until this first install.
-gc --city "$CITY_PATH" import install
+gc --city "$CITY_PATH" --rig "$GC_CITY_DOCS_REVIEW_RIG_DIR" import install
 
 # The imported agent deliberately has no provider of its own. Bind it to this
 # fixed, credential-free Codex lane exactly once, so a dispatch produces a
@@ -82,7 +82,7 @@ fi
 # The city lockfile pins remote packs but the controller cache lives in the
 # Compose runtime mount, not in the source checkout. Populate it on every
 # start; gc import install is idempotent when the lock is already cached.
-gc --city "$CITY_PATH" import install
+gc --city "$CITY_PATH" --rig "$GC_CITY_DOCS_REVIEW_RIG_DIR" import install
 
 if [ "${CITY_MAIL_WAKE_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-wake &
