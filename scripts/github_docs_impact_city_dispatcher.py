@@ -129,7 +129,8 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict) and value.get("kind") == "github-pr-docs-impact-review":
-            review = value
+            if value.get("verdict") in {"no-impact", "docs-sufficient", "docs-change-required", "proposal-ready", "inconclusive"}:
+                review = value
     return review
 
 
