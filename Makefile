@@ -1,13 +1,16 @@
 ENV_FILE ?= .env
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.PHONY: config bootstrap up down smoke github-docs-impact-preflight buzz-up buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight buzz-mayor-bridge-up buzz-mayor-bridge-smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
+.PHONY: config bootstrap city-bootstrap up down smoke github-docs-impact-preflight buzz-up buzz-mayor-bridge-bootstrap buzz-mayor-bridge-preflight buzz-mayor-bridge-up buzz-mayor-bridge-smoke gitea-mcp-up gitea-mcp-bootstrap gitea-bridge-bootstrap gitea-bridge-up gitea-intake-doctor gitea-mail-bridge-bootstrap gitea-mail-bridge-up gitea-mail-launcher-up gitea-mail-launcher-smoke gitea-mail-acceptance-demo gitea-mail-bridge-smoke woodpecker-fixture-bootstrap woodpecker-preflight woodpecker-up woodpecker-smoke woodpecker-acceptance test
 
 config:
 	$(COMPOSE) config --quiet
 
 bootstrap:
 	ENV_FILE=$(ENV_FILE) sh ./scripts/bootstrap.sh
+
+city-bootstrap:
+	ENV_FILE=$(ENV_FILE) sh ./scripts/city-bootstrap.sh
 
 up: bootstrap
 	$(COMPOSE) up -d --wait --wait-timeout 90
