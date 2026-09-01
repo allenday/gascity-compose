@@ -98,6 +98,7 @@ test:
 	sh ./scripts/tests/test_buzz_mayor_bridge.sh
 	sh ./scripts/tests/test_github_docs_impact.sh
 	sh ./scripts/tests/test_github_docs_impact_preflight.sh
+	sh ./scripts/tests/test_city_bootstrap.sh
 	sh ./scripts/tests/test_woodpecker_fixture.sh
 	sh ./scripts/tests/test_gitea_mail_bridge.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py

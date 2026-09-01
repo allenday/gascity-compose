@@ -108,7 +108,7 @@ forbid_city() {
 # receives the persisted immutable assignment only after the runtime records it.
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
-require_city 'GC_CITY_DOCS_REVIEW_TARGET: gascity/github-docs-impact.docs-impact-reviewer'
+require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 forbid_city 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
@@ -118,6 +118,11 @@ if grep -Fq 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.
   exit 1
 fi
 require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
+require 'gc --city "\$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact' "$root/docker/city-entrypoint.sh"
+if grep -Fq 'gc --city "$CITY_PATH" --rig "$GC_CITY_DOCS_REVIEW_RIG_DIR" import add /opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"; then
+  echo 'github docs-impact is city-scoped and must not be imported into a rig' >&2
+  exit 1
+fi
 require 'github-docs-impact-city-dispatcher' "$root/docker/city-entrypoint.sh"
 require '127\.0\.0\.1:8372/api/health' "$root/docker/city-entrypoint.sh"
 require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"

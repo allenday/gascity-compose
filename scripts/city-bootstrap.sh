@@ -5,23 +5,64 @@ env_file="${ENV_FILE:-.env}"
 value() { awk -F= -v key="$1" '$1 == key { value = substr($0, length(key) + 2) } END { print value }' "$env_file"; }
 city_dir="$(value CITY_DIR)"
 project_dir="$(value MY_PROJECT_DIR)"
-source_dir="$(value GASCITY_SOURCE_DIR)"
+review_rig_dir="$(value GC_CITY_DOCS_REVIEW_RIG_DIR)"
 city_name="$(value CITY_NAME)"
 [ -n "$city_name" ] || city_name=my-city
-for path in "$city_dir" "$project_dir" "$source_dir"; do
+for path in "$city_dir" "$project_dir" "$review_rig_dir"; do
   case "$path" in /*) ;; *) echo "ERROR: absolute path required: $path" >&2; exit 1;; esac
 done
 compose() { docker compose --env-file "$env_file" "$@"; }
-
-if [ ! -f "$city_dir/city.toml" ]; then
-  mkdir -p "$city_dir"
+if compose ps --status running --services city | rg -Fx city >/dev/null; then
+  printf '%s\n' 'ERROR: City is running; stop it before bootstrap to preserve the single-supervisor invariant.' >&2
+  exit 1
+fi
+gc() {
   compose run --rm --no-deps --entrypoint sh city -ec '
     dolt config --global --add user.name "${DOLT_USER_NAME:-Allen Day}"
     dolt config --global --add user.email "${DOLT_USER_EMAIL:-allenday@allenday.com}"
-    exec gc init --template gascity --default-provider codex --skip-provider-readiness --no-start --name "$CITY_NAME" "$CITY_PATH"
-  '
+    exec gc "$@"
+  ' sh "$@"
+}
+
+if [ ! -f "$city_dir/city.toml" ]; then
+  mkdir -p "$city_dir"
+  gc init --template gascity --default-provider codex --skip-provider-readiness --no-start --name "$city_name" "$city_dir"
 fi
-for rig in "$project_dir" "$source_dir"; do
-  compose run --rm --no-deps --entrypoint gc city rig add --city "$city_dir" "$rig" >/dev/null 2>&1 || true
+registered_rigs() {
+  # The current CLI emits setup notices before its JSON result. Keep the final
+  # JSONL record as the command contract, rather than parsing human notices.
+  gc rig list --city "$city_dir" --json | tail -n 1
+}
+
+rig_is_registered() {
+  rig="$1"
+  printf '%s\n' "$rigs_json" | jq -e --arg rig "$rig" '.rigs[] | select(.path == $rig)' >/dev/null
+}
+
+register_rig() {
+  rig="$1"
+  if rig_is_registered "$rig"; then
+    return
+  fi
+  rig_name="$(basename "$rig")"
+  if [ -f "$rig/.beads/metadata.json" ] && [ -f "$rig/.beads/config.yaml" ]; then
+    gc rig add --city "$city_dir" --name "$rig_name" --adopt "$rig"
+  else
+    gc rig add --city "$city_dir" --name "$rig_name" "$rig"
+  fi
+}
+
+rigs_json="$(registered_rigs)"
+register_rig "$project_dir"
+if [ "$review_rig_dir" != "$project_dir" ]; then
+  register_rig "$review_rig_dir"
+fi
+
+rigs_json="$(registered_rigs)"
+for rig in "$project_dir" "$review_rig_dir"; do
+  if ! rig_is_registered "$rig"; then
+    printf '%s\n' "ERROR: rig registration missing from city config: $rig" >&2
+    exit 1
+  fi
 done
 printf '%s\n' "PASS: City $city_name and configured rigs are bootstrapped"

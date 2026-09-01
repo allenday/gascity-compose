@@ -187,7 +187,7 @@ services:
       # trusted City. The reviewer has no GitHub credential or publisher path.
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      GC_CITY_DOCS_REVIEW_TARGET: gascity/github-docs-impact.docs-impact-reviewer
+      GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       CODEX_HOME: /run/codex

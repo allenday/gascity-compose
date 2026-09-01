@@ -24,6 +24,7 @@ CITY_DIR=$city
 MY_PROJECT_DIR=$rig
 GASCITY_SOURCE_DIR=$source
 GC_CITY_DOCS_REVIEW_RIG_DIR=$source
+GC_CITY_DOCS_REVIEW_TARGET=source/github-docs-impact.docs-impact-reviewer
 CODEX_AUTH_FILE=$auth
 CITY_MAIL_LAUNCHER_RIG=my-project
 STACK_PASSWORD=test-password
