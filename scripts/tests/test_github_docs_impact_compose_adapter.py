@@ -116,6 +116,31 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
         self.assertIsNone(dispatcher._review_from_peek({"output": "• {not json}"}))
 
+    def test_city_export_replaces_a_stale_transcript_for_the_same_assignment(self) -> None:
+        """An older session result must never freeze a newer SHA's marker."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            transcript = root / "transcripts" / f"{digest}.json"
+            transcript.parent.mkdir()
+            stale = review()
+            stale["identity"] = {**stale["identity"], "source_key": "github-pr:17:9:" + "c" * 40}
+            transcript.write_text(json.dumps({"entries": [{"role": "assistant", "text": json.dumps(stale)}]}))
+            result = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(review())}), stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result):
+                self.assertEqual(dispatcher.export_transcripts(), [digest])
+            exported = json.loads(transcript.read_text())
+            self.assertEqual(json.loads(exported["entries"][-1]["text"])["identity"]["source_key"], source_key)
+            self.assertEqual(len(list((root / "transcripts" / "rejected").glob(f"{digest}.*.json"))), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -134,6 +134,31 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
     return review
 
 
+def _stored_transcript_matches_source(path: pathlib.Path, source_key: str) -> bool:
+    """Accept a persisted transcript only when it is bound to this exact SHA."""
+    try:
+        transcript = json.loads(path.read_text(encoding="utf-8"))
+        entries = transcript.get("entries") if isinstance(transcript, dict) else None
+        if not isinstance(entries, list):
+            return False
+        for entry in reversed(entries):
+            if not isinstance(entry, dict) or entry.get("role") != "assistant":
+                continue
+            review = json.loads(entry.get("text")) if isinstance(entry.get("text"), str) else None
+            identity = review.get("identity") if isinstance(review, dict) else None
+            return isinstance(identity, dict) and identity.get("source_key") == source_key
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return False
+
+
+def _quarantine_stale_transcript(path: pathlib.Path) -> None:
+    """Retain stale output for diagnosis without letting it block a fresh SHA."""
+    rejected = path.parent / "rejected"
+    rejected.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.replace(rejected / f"{path.stem}.{time.time_ns()}{path.suffix}")
+
+
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
@@ -147,7 +172,11 @@ def export_transcripts() -> list[str]:
             marker_json = json.loads(marker_path.read_text())
             if marker_json.get("dispatched") is not True: continue
             transcript_path = review_dir / "transcripts" / marker_path.name
-            if transcript_path.exists(): continue
+            replace_stale = False
+            if transcript_path.exists():
+                if _stored_transcript_matches_source(transcript_path, marker_json["source_key"]):
+                    continue
+                replace_stale = True
             bead = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
             if bead.returncode: continue
             bead_json = json.loads(bead.stdout)
@@ -164,6 +193,8 @@ def export_transcripts() -> list[str]:
             if not isinstance(identity, dict) or identity.get("source_key") != marker_json["source_key"]:
                 continue
             transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
+            if replace_stale:
+                _quarantine_stale_transcript(transcript_path)
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
             exported.append(marker_path.stem)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
