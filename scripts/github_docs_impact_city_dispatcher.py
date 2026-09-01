@@ -254,7 +254,18 @@ def export_transcripts() -> list[str]:
             result = subprocess.run(["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"], capture_output=True, text=True, check=False, timeout=20)
             if result.returncode: continue
             review = _review_from_peek(json.loads(result.stdout))
-            if review is None: continue
+            if review is None:
+                # A closed reviewer has no further output to await. Persist a
+                # trusted completion sentinel so the adapter can terminalize
+                # the Check as inconclusive rather than wait for its deadline.
+                if bead_json.get("status") != "closed":
+                    continue
+                transcript = {"entries": [{"role": "system", "text": "invalid-final"}]}
+                if replace_stale:
+                    _quarantine_stale_transcript(transcript_path)
+                _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+                exported.append(marker_path.stem)
+                continue
             identity = review.get("identity")
             if not isinstance(identity, dict) or identity.get("source_key") != marker_json["source_key"]:
                 continue

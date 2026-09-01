@@ -99,7 +99,14 @@ def _inconclusive_from_invalid_final(raw_assignment: bytes, transcript: dict[str
     bound ``inconclusive`` decision.  It never preserves the malformed verdict
     or proposal, so it cannot create a follow-up branch or make a Check pass.
     """
-    if _final_assistant_document(transcript) is None:
+    entries = transcript.get("entries")
+    invalid_completion = isinstance(entries, list) and any(
+        isinstance(entry, dict)
+        and entry.get("role") == "system"
+        and entry.get("text") == "invalid-final"
+        for entry in entries
+    )
+    if _final_assistant_document(transcript) is None and not invalid_completion:
         return None
     try:
         assignment = json.loads(raw_assignment)
