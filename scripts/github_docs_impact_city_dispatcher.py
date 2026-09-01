@@ -104,6 +104,30 @@ def create_pending() -> list[str]:
     return created
 
 
+def export_transcripts() -> list[str]:
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    exported: list[str] = []
+    for marker_path in sorted((review_dir / "dispatch").glob("*.json")):
+        marker = _pending_marker(marker_path)
+        if marker is not None:
+            continue
+        try:
+            marker_json = json.loads(marker_path.read_text())
+            if marker_json.get("dispatched") is not True: continue
+            transcript_path = review_dir / "transcripts" / marker_path.name
+            if transcript_path.exists(): continue
+            result = subprocess.run(["gc", "--city", city, "session", "logs", marker_json["bead_id"], "--tail", "5", "--json"], capture_output=True, text=True, check=False, timeout=20)
+            if result.returncode: continue
+            transcript = json.loads(result.stdout)
+            if not isinstance(transcript, dict): continue
+            _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+            exported.append(marker_path.stem)
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return exported
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
@@ -111,7 +135,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"created": create_pending(), "dispatched": dispatch_pending()}, sort_keys=True), flush=True)
+            print(json.dumps({"created": create_pending(), "dispatched": dispatch_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

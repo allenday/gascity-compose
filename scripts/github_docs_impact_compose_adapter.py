@@ -89,25 +89,6 @@ def _candidate_from_transcript(raw_assignment: bytes, transcript: dict[str, Any]
         return None
 
 
-def _session_transcript(bead_id: str) -> dict[str, Any] | None:
-    city = os.environ.get("GC_CITY_ROOT", "").strip()
-    if not city or not bead_id:
-        return None
-    result = subprocess.run(
-        ["gc", "--city", city, "session", "logs", bead_id, "--tail", "5", "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode:
-        return None
-    try:
-        value = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, dict) else None
-
-
 def _harvest_city_candidates() -> list[str]:
     """Bridge a completed City transcript into the trusted candidate outbox.
 
@@ -131,7 +112,9 @@ def _harvest_city_candidates() -> list[str]:
             raw_assignment = assignment_path.read_bytes()
             if hashlib.sha256(raw_assignment).hexdigest() != digest:
                 continue
-            candidate = _candidate_from_transcript(raw_assignment, _session_transcript(str(marker["bead_id"])) or {})
+            transcript_path = review_root.parent / "transcripts" / f"{digest}.json"
+            transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else {}
+            candidate = _candidate_from_transcript(raw_assignment, transcript)
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             continue
         if candidate is None:
