@@ -11,7 +11,6 @@ require() {
 }
 
 require 'github-webhook:' "$compose"
-require 'github-admin:' "$compose"
 require 'github-docs-review-runtime:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
@@ -25,11 +24,7 @@ if grep -Fq '${GITHUB_PACK_DIR:-' "$compose"; then
 fi
 require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub pack checkout' "$compose"
 require 'city:8080' "$root/nginx/nginx.conf"
-require 'city:8081' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
-require 'location = /v0/github/admin' "$root/nginx/nginx.conf"
-require 'location \^~ /v0/github/admin/' "$root/nginx/nginx.conf"
-require 'location \^~ /v0/github/app/' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
 require 'action = "reopened"' "$rules"
 require 'action = "synchronize"' "$rules"
@@ -50,8 +45,6 @@ runtime_block=$(awk '/^  github-docs-review-runtime:/{inside=1} inside {print} i
 [ -n "$runtime_block" ] || { echo 'github-docs-review-runtime service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
-admin_block=$(awk '/^  github-admin:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-admin:/{exit}' "$compose")
-[ -n "$admin_block" ] || { echo 'github-admin service block is missing' >&2; exit 1; }
 reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
 egress_block=$(awk '/^  github-docs-model-egress:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-model-egress:/{exit}' "$compose")
 city_block=$(awk '/^  city:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  city:/{exit}' "$compose")
@@ -63,14 +56,6 @@ require_webhook() {
   pattern=$1
   printf '%s\n' "$webhook_block" | grep -Eq "$pattern" || {
     echo "missing $pattern in github-webhook" >&2
-    exit 1
-  }
-}
-
-require_admin() {
-  pattern=$1
-  printf '%s\n' "$admin_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-admin" >&2
     exit 1
   }
 }
@@ -96,6 +81,8 @@ forbid_runtime() {
 require_runtime 'github_docs_impact_compose_adapter.py.*reconcile.*--loop'
 require_runtime 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_runtime 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_runtime 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
+require_runtime 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
 require_runtime 'network_mode: "service:city"'
 require_runtime 'restart: unless-stopped'
@@ -121,7 +108,7 @@ forbid_city() {
 # receives the persisted immutable assignment only after the runtime records it.
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
-require_city 'GC_CITY_DOCS_REVIEW_TARGET: github-docs-impact.docs-impact-reviewer'
+require_city 'GC_CITY_DOCS_REVIEW_TARGET: gascity/github-docs-impact.docs-impact-reviewer'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 forbid_city 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
@@ -148,7 +135,7 @@ fi
 # profile-gated, so this does not weaken the one-supervisor-at-a-time guard.
 require '^    profiles: \[city, github-docs-impact\]$' "$compose"
 profile_services=$(docker compose --env-file "$root/.env.example" --profile github-docs-impact config --services)
-for expected in city github-webhook github-admin github-docs-review-runtime; do
+for expected in city github-webhook github-docs-review-runtime; do
   printf '%s\n' "$profile_services" | grep -Fx "$expected" >/dev/null || {
     echo "github-docs-impact profile does not activate $expected" >&2
     exit 1
@@ -159,10 +146,11 @@ done
 # the run, and asks the runtime adapter to dispatch only after that record.
 require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
+require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
+require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
 require_webhook 'network_mode: "service:city"'
 require_webhook 'GC_HOME: /root/.gc'
 require_webhook 'state/gc-runtime:/root/.gc'
-require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
-require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
-require_admin 'network_mode: "service:city"'
+require_webhook 'github_docs_impact_webhook.py'

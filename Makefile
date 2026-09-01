@@ -100,3 +100,4 @@ test:
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_mcp_proxy.py
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_gitea_intake_permission_reader.py
 	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_city_mail_launcher.py
+	PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/tests/test_github_docs_impact_compose_adapter.py

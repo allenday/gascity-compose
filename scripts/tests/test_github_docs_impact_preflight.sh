@@ -12,10 +12,10 @@ rig="$temp/rig"
 source="$temp/source"
 auth="$temp/auth.json"
 state="$temp/github-intake"
-mkdir -p "$pack/github/scripts" "$city" "$rig" "$source" "$state/data"
-: > "$pack/github/scripts/github_intake_service.py"
+mkdir -p "$pack/github/scripts" "$pack/github/agents/docs-impact-reviewer" "$city" "$rig" "$source" "$state/data"
 : > "$pack/github/scripts/github_intake_docs_review_runtime.py"
 : > "$pack/github/scripts/github_intake_docs_impact.py"
+: > "$pack/github/agents/docs-impact-reviewer/prompt.template.md"
 : > "$auth"
 
 env_file="$temp/github.env"
@@ -23,6 +23,7 @@ cat > "$env_file" <<EOF
 CITY_DIR=$city
 MY_PROJECT_DIR=$rig
 GASCITY_SOURCE_DIR=$source
+GC_CITY_DOCS_REVIEW_RIG_DIR=$source
 CODEX_AUTH_FILE=$auth
 CITY_MAIL_LAUNCHER_RIG=my-project
 STACK_PASSWORD=test-password
@@ -45,8 +46,6 @@ GITHUB_PACK_DIR=$pack
 GITHUB_APP_ID=4748619
 GITHUB_WEBHOOK_SECRET=test-secret
 GITHUB_APP_PRIVATE_KEY_PEM=test-key
-GITHUB_INTAKE_ADMIN_PUBLIC_URL=https://city.example
-GITHUB_INTAKE_WEBHOOK_HOOK_URL=http://203.0.113.7:8088/v0/github/webhook
 EOF
 
 ENV_FILE="$env_file" sh "$script"
@@ -64,7 +63,6 @@ sed -i 's#GITHUB_PACK_DIR=.*#GITHUB_PACK_DIR='"$pack"'#' "$env_file"
 sed -i 's#GITHUB_APP_ID=.*#GITHUB_APP_ID=#' "$env_file"
 sed -i 's#GITHUB_WEBHOOK_SECRET=.*#GITHUB_WEBHOOK_SECRET=#' "$env_file"
 sed -i 's#GITHUB_APP_PRIVATE_KEY_PEM=.*#GITHUB_APP_PRIVATE_KEY_PEM=#' "$env_file"
-sed -i 's#GITHUB_INTAKE_WEBHOOK_HOOK_URL=.*#GITHUB_INTAKE_WEBHOOK_HOOK_URL=#' "$env_file"
 printf '%s\n' 'GITHUB_INTAKE_STATE_ROOT='"$state" >> "$env_file"
 printf '%s\n' '{"app":{"app_id":"4748619","webhook_secret":"test-secret","private_key_pem":"test-key"}}' > "$state/data/config.json"
 ENV_FILE="$env_file" sh "$script"

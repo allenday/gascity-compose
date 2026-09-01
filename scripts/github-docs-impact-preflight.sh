@@ -29,8 +29,6 @@ pack_dir=$(require_value GITHUB_PACK_DIR)
 app_id=$(value GITHUB_APP_ID)
 webhook_secret=$(value GITHUB_WEBHOOK_SECRET)
 private_key=$(value GITHUB_APP_PRIVATE_KEY_PEM)
-admin_url=$(require_value GITHUB_INTAKE_ADMIN_PUBLIC_URL)
-hook_url=$(value GITHUB_INTAKE_WEBHOOK_HOOK_URL)
 state_root=$(value GITHUB_INTAKE_STATE_ROOT)
 state_root=${state_root:-"$root/state/github-intake"}
 
@@ -45,7 +43,7 @@ case "$pack_dir" in
   *) fail "GITHUB_PACK_DIR must be an absolute path" ;;
 esac
 [ -d "$pack_dir" ] || fail "GITHUB_PACK_DIR does not exist: $pack_dir"
-for required in github/scripts/github_intake_service.py github/scripts/github_intake_docs_review_runtime.py github/scripts/github_intake_docs_impact.py; do
+for required in github/scripts/github_intake_docs_review_runtime.py github/scripts/github_intake_docs_impact.py github/agents/docs-impact-reviewer/prompt.template.md; do
   [ -f "$pack_dir/$required" ] || fail "GITHUB_PACK_DIR lacks $required"
 done
 
@@ -67,10 +65,5 @@ required = ("app_id", "webhook_secret", "private_key_pem")
 raise SystemExit(not all(str(app.get(key, "")).strip() for key in required))
 PY
 fi
-case "$admin_url" in https://*) ;; *) fail "GITHUB_INTAKE_ADMIN_PUBLIC_URL must be an https URL" ;; esac
-if [ -n "$hook_url" ]; then
-  case "$hook_url" in http://*/v0/github/webhook|https://*/v0/github/webhook) ;; *) fail "GITHUB_INTAKE_WEBHOOK_HOOK_URL must end in /v0/github/webhook" ;; esac
-fi
-
 ENV_FILE="$env_file" docker compose --env-file "$env_file" --profile github-docs-impact config --quiet
 printf '%s\n' 'github-docs-impact preflight: ready'

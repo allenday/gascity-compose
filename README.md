@@ -30,9 +30,8 @@ Prometheus scrape targets.
 
 Enable the complete GitHub profile with the initial App credentials in ignored
 `.env` or an already-imported protected intake state. Before starting it, set
-`GITHUB_PACK_DIR` to an absolute pack checkout and
-`GITHUB_INTAKE_ADMIN_PUBLIC_URL` to the Tailnet-only App setup URL. Validate
-those prerequisites with:
+`GITHUB_PACK_DIR` to an absolute pack checkout. Validate those prerequisites
+with:
 
 ```bash
 make github-docs-impact-preflight ENV_FILE=.env
@@ -41,7 +40,7 @@ make github-docs-impact-preflight ENV_FILE=.env
 The preflight verifies the Compose route, pack entrypoints, and either the
 initial `.env` credentials or the imported credentials in
 `state/github-intake/data/config.json`. This profile starts the City, signed
-webhook/admin service, and local runtime adapter together:
+webhook service, and local runtime adapter together:
 
 ```bash
 docker compose --profile github-docs-impact up -d --build
@@ -54,11 +53,11 @@ create a second supervisor or weaken the single-supervisor rule.
 The signed webhook reads every GitHub PR-files page and creates one exact,
 SHA-bound assignment. The runtime first saves its durable lifecycle record,
 then creates and slings an immutable City review task. The reviewer has no
-GitHub credential; it writes a candidate envelope to the shared review outbox.
-The runtime validates that envelope, uses the App credentials to publish the
-compact Check Run or App-owned follow-up PR, and periodically reconciles
-interrupted runs. No proposal diff or deployment-admin page is linked from
-GitHub.
+GitHub credential and returns only a JSON decision. The trusted runtime reads
+that task's final session transcript, binds and validates it against the saved
+assignment, then uses the App credentials to publish the compact Check Run or
+App-owned follow-up PR. It periodically reconciles interrupted runs. No
+proposal diff or deployment-admin page is linked from GitHub.
 
 ## Start the City safely
 

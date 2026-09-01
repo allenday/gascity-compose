@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+
+PACK_SCRIPTS = pathlib.Path("/root/src/gascity-packs/github/scripts")
+os.environ["GC_GITHUB_PACK_SCRIPTS"] = str(PACK_SCRIPTS)
+spec = importlib.util.spec_from_file_location(
+    "github_docs_impact_compose_adapter",
+    pathlib.Path(__file__).resolve().parents[1] / "github_docs_impact_compose_adapter.py",
+)
+assert spec and spec.loader
+adapter = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = adapter
+spec.loader.exec_module(adapter)
+
+
+SHA = "a" * 40
+
+
+def assignment() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "kind": "github-pr-docs-impact-assignment",
+        "identity": {"repository_id": "17", "repository": "example/docs", "pr_number": 9, "head_sha": SHA, "source_key": f"github-pr:17:9:{SHA}"},
+        "agent_skill": "developer-experience-techdocs",
+        "evidence_bundle": {"head_sha": SHA, "proposal_identity": {"repository_id": "17", "repository": "example/docs", "pr_number": 9, "base_sha": "b" * 40, "head_sha": SHA, "head_repository_id": "17", "head_repository": "example/docs", "base_ref": "main"}, "files": [{"path": "docs/guide.md", "reference": f"github://example/docs/blob/{SHA}/docs/guide.md", "patch": "@@ -1 +1 @@\n-old\n+new\n"}]},
+    }
+
+
+def review() -> dict[str, object]:
+    source = assignment()["identity"]
+    return {"schema_version": 1, "kind": "github-pr-docs-impact-review", "identity": source, "agent_skill": "developer-experience-techdocs", "verdict": "no-impact", "rationale": "The documentation is sufficient.", "evidence": [{"path": "docs/guide.md", "evidence": f"github://example/docs/blob/{SHA}/docs/guide.md"}], "confidence": 0.9, "proposal": None}
+
+
+class CandidateBridgeTests(unittest.TestCase):
+    def test_final_assistant_document_requires_exact_json(self) -> None:
+        self.assertIsNone(adapter._final_assistant_document({"entries": [{"role": "assistant", "text": "Here is the result: {}"}]}))
+        self.assertEqual(adapter._final_assistant_document({"entries": [{"role": "assistant", "text": json.dumps(review())}]}), review())
+
+    def test_candidate_is_bound_to_the_exact_assignment_bytes(self) -> None:
+        raw = json.dumps(assignment(), sort_keys=True, separators=(",", ":")).encode()
+        transcript = {"entries": [{"role": "assistant", "text": json.dumps(review())}]}
+        candidate = adapter._candidate_from_transcript(raw, transcript)
+
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate["snapshot_sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(candidate["artifact"]["verdict"], "no-impact")
+
+    def test_nonfinal_or_invalid_assistant_output_is_not_a_candidate(self) -> None:
+        raw = json.dumps(assignment(), sort_keys=True, separators=(",", ":")).encode()
+        self.assertIsNone(adapter._candidate_from_transcript(raw, {"entries": [{"role": "assistant", "text": "working"}]}))
+        bad = review()
+        bad["identity"] = {**bad["identity"], "head_sha": "c" * 40}
+        self.assertIsNone(adapter._candidate_from_transcript(raw, {"entries": [{"role": "assistant", "text": json.dumps(bad)}]}))
+
+    def test_dispatch_places_the_immutable_assignment_in_the_city_task(self) -> None:
+        source = assignment()
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            run = {"assignment_bytes": __import__("base64").b64encode(raw).decode(), "assignment": source}
+            with mock.patch.dict(os.environ, {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates"), "GC_CITY_ROOT": "/city"}, clear=False), mock.patch.object(adapter.subprocess, "run") as command:
+                command.side_effect = [mock.Mock(returncode=0, stdout='{"id":"bead-1"}', stderr=""), mock.Mock(returncode=0, stdout="{}", stderr="")]
+                adapter._dispatch_city(run)
+
+            create = command.call_args_list[0].args[0]
+            description = create[create.index("--description") + 1]
+            self.assertIn(raw.decode(), description)
+            self.assertNotIn(f"assignments/{digest}.json", description)
+
+
+if __name__ == "__main__":
+    unittest.main()

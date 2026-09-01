@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 
-PACK_SCRIPTS = "/opt/gascity-packs/github/scripts"
+PACK_SCRIPTS = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
 if PACK_SCRIPTS not in sys.path:
     sys.path.insert(0, PACK_SCRIPTS)
 
@@ -51,6 +51,94 @@ def _atomic_write(path: pathlib.Path, payload: bytes, mode: int = 0o600) -> None
 
 def _assignment_bytes(assignment: dict[str, Any]) -> bytes:
     return json.dumps(assignment, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _final_assistant_document(transcript: dict[str, Any]) -> dict[str, Any] | None:
+    """Return only an exact final assistant JSON object, never scraped prose."""
+    entries = transcript.get("entries")
+    if not isinstance(entries, list):
+        return None
+    for entry in reversed(entries):
+        if not isinstance(entry, dict) or entry.get("role") != "assistant":
+            continue
+        text = entry.get("text")
+        if not isinstance(text, str):
+            continue
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        return document if isinstance(document, dict) else None
+    return None
+
+
+def _candidate_from_transcript(raw_assignment: bytes, transcript: dict[str, Any]) -> dict[str, Any] | None:
+    """Bind one exact City final response to the immutable assignment."""
+    artifact = _final_assistant_document(transcript)
+    if artifact is None:
+        return None
+    envelope = {
+        "schema_version": 1,
+        "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(),
+        "artifact": artifact,
+    }
+    try:
+        import github_intake_docs_patch_worker as worker
+        return worker.validate_final_candidate(raw_assignment, envelope)
+    except ValueError:
+        return None
+
+
+def _session_transcript(bead_id: str) -> dict[str, Any] | None:
+    city = os.environ.get("GC_CITY_ROOT", "").strip()
+    if not city or not bead_id:
+        return None
+    result = subprocess.run(
+        ["gc", "--city", city, "session", "logs", bead_id, "--tail", "5", "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return None
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _harvest_city_candidates() -> list[str]:
+    """Bridge a completed City transcript into the trusted candidate outbox.
+
+    The City only emits its credential-free review decision. This trusted
+    adapter reads its own task transcript, validates it against the exact
+    persisted assignment, then atomically creates the candidate envelope.
+    """
+    review_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR")
+    candidate_root = _path_env("GC_GITHUB_DOCS_CANDIDATE_DIR")
+    harvested: list[str] = []
+    for marker_path in sorted((review_root.parent / "dispatch").glob("*.json")):
+        digest = marker_path.stem
+        assignment_path = review_root / f"{digest}.json"
+        candidate_path = candidate_root / f"{digest}.json"
+        if candidate_path.exists() or not assignment_path.is_file():
+            continue
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            if not isinstance(marker, dict) or set(marker) != {"bead_id", "source_key", "dispatched"} or marker.get("dispatched") is not True:
+                continue
+            raw_assignment = assignment_path.read_bytes()
+            if hashlib.sha256(raw_assignment).hexdigest() != digest:
+                continue
+            candidate = _candidate_from_transcript(raw_assignment, _session_transcript(str(marker["bead_id"])) or {})
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if candidate is None:
+            continue
+        _atomic_write(candidate_path, _assignment_bytes(candidate))
+        harvested.append(digest)
+    return harvested
 
 
 def _installation_id(payload: dict[str, Any]) -> str:
@@ -127,39 +215,69 @@ def _dispatch_city(run: dict[str, Any]) -> None:
         _atomic_write(assignment_path, assignment_bytes, mode=0o400)
 
     dispatch_marker = review_root.parent / "dispatch" / f"{digest}.json"
-    if dispatch_marker.exists():
-        return
     identity = run["assignment"]["identity"]
     city = os.environ.get("GC_CITY_ROOT", "").strip()
-    target = os.environ.get("GC_CITY_DOCS_REVIEW_TARGET", "github-docs-impact.docs-impact-reviewer").strip()
+    target = os.environ.get("GC_CITY_DOCS_REVIEW_TARGET", "gascity/github-docs-impact.docs-impact-reviewer").strip()
     if not city or not target:
         raise ValueError("City docs reviewer target is not configured")
     candidate_path = _path_env("GC_GITHUB_DOCS_CANDIDATE_DIR") / f"{digest}.json"
+    marker: dict[str, Any] | None = None
+    if dispatch_marker.exists():
+        try:
+            marker = json.loads(dispatch_marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid durable City dispatch marker") from exc
+        if not isinstance(marker, dict) or marker.get("source_key") != identity["source_key"] or not isinstance(marker.get("bead_id"), str):
+            raise ValueError("invalid durable City dispatch marker")
+        if marker.get("dispatched") is True:
+            return
     description = "\n".join((
         "Review the immutable GitHub pull-request documentation assignment.",
-        f"Assignment: /var/lib/github-docs-impact/review/assignments/{digest}.json",
-        f"Candidate outbox: /var/lib/github-docs-impact/review/candidates/{digest}.json",
+        "The JSON below is the complete, SHA-bound record. Do not fetch other state.",
+        "",
+        assignment_bytes.decode("utf-8"),
+        "",
         f"Source key: {identity['source_key']}",
-        "Return one canonical github-pr-docs-impact-review JSON candidate bound to the assignment.",
-        "Do not use GitHub credentials or mutate GitHub.",
+        "Return one canonical github-pr-docs-impact-review JSON decision bound to the assignment.",
+        "Do not use GitHub credentials, network access, or mutate GitHub.",
     ))
     metadata = json.dumps({"github.docs_review.assignment_sha256": digest, "github.docs_review.candidate_path": str(candidate_path)}, sort_keys=True)
-    created = subprocess.run(
-        ["gc", "--city", city, "bd", "create", f"Review docs impact for PR #{identity['pr_number']}", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"],
-        capture_output=True, text=True, check=False,
-    )
-    if created.returncode:
-        raise ValueError(created.stderr.strip() or "City could not create docs review task")
-    response = json.loads(created.stdout)
-    if isinstance(response, list) and len(response) == 1:
-        response = response[0]
-    bead_id = str((response or {}).get("id", "")) if isinstance(response, dict) else ""
-    if not bead_id:
-        raise ValueError("City returned no docs review task id")
-    sling = subprocess.run(["gc", "--city", city, "sling", target, bead_id, "--no-convoy", "--no-formula", "--nudge", "--json"], capture_output=True, text=True, check=False)
+    # This sidecar shares City's managed Dolt namespace. Use its pinned Beads
+    # client directly for the one task creation so a second `gc` controller
+    # lookup cannot block behind the supervisor's own store coordination.
+    if marker is None:
+        direct_bd = os.environ.get("GC_GITHUB_INTAKE_DIRECT_BD", "") == "1"
+        rig_dir = os.environ.get("GC_CITY_DOCS_REVIEW_RIG_DIR", "").strip()
+        create_command = (["bd", "-C", rig_dir] if direct_bd and rig_dir else ["gc", "--city", city, "bd"])
+        create_command.extend(["create", f"Review docs impact for PR #{identity['pr_number']}", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"])
+        try:
+            create_env = dict(os.environ)
+            if direct_bd and rig_dir:
+                # BEADS_DIR points to the City's ledger for the webhook
+                # service. The reviewer task belongs in the reviewer rig.
+                create_env.pop("BEADS_DIR", None)
+            created = subprocess.run(create_command, capture_output=True, text=True, check=False, timeout=45, env=create_env)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("City timed out creating docs review task") from exc
+        if created.returncode:
+            raise ValueError(created.stderr.strip() or "City could not create docs review task")
+        response = json.loads(created.stdout)
+        if isinstance(response, list) and len(response) == 1:
+            response = response[0]
+        bead_id = str((response or {}).get("id", "")) if isinstance(response, dict) else ""
+        if not bead_id:
+            raise ValueError("City returned no docs review task id")
+        marker = {"bead_id": bead_id, "source_key": identity["source_key"], "dispatched": False}
+        _atomic_write(dispatch_marker, _assignment_bytes(marker))
+    else:
+        bead_id = marker["bead_id"]
+    try:
+        sling = subprocess.run(["gc", "--city", city, "sling", target, bead_id, "--force", "--no-convoy", "--no-formula", "--nudge", "--json"], capture_output=True, text=True, check=False, timeout=45)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("City timed out dispatching docs review task") from exc
     if sling.returncode:
         raise ValueError(sling.stderr.strip() or "City could not dispatch docs review task")
-    _atomic_write(dispatch_marker, json.dumps({"bead_id": bead_id, "source_key": identity["source_key"]}, sort_keys=True).encode("utf-8"))
+    _atomic_write(dispatch_marker, _assignment_bytes({"bead_id": bead_id, "source_key": identity["source_key"], "dispatched": True}))
 
 
 def intake(payload: dict[str, Any], token: str, now: float) -> dict[str, Any]:
@@ -186,7 +304,8 @@ def candidates(now: float) -> list[dict[str, Any]]:
 def reconcile(now: float) -> dict[str, Any]:
     store = runtime.FileDocsReviewStore(_path_env("GC_GITHUB_DOCS_REVIEW_RUNS_DIR"))
     adapter = ComposeAdapter(store, _gateway())
-    return {"candidates": candidates(now), "runs": runtime.reconcile_pending(store, adapter, now=now)}
+    harvested = _harvest_city_candidates()
+    return {"harvested": harvested, "candidates": candidates(now), "runs": runtime.reconcile_pending(store, adapter, now=now)}
 
 
 def main() -> int:
