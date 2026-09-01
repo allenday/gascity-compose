@@ -30,6 +30,8 @@ def _validate_final_candidate(raw_assignment: bytes, envelope: dict[str, object]
     artifact = envelope.get("artifact")
     if not isinstance(artifact, dict) or artifact.get("identity") != assignment.get("identity"):
         raise ValueError("candidate identity must match its immutable assignment")
+    if artifact.get("verdict") == "proposal-ready" and artifact.get("proposal") is None:
+        raise ValueError("proposal-ready requires a complete proposal")
     return envelope
 
 
@@ -95,6 +97,21 @@ class CandidateBridgeTests(unittest.TestCase):
         bad = review()
         bad["identity"] = {**bad["identity"], "head_sha": "c" * 40}
         self.assertIsNone(adapter._candidate_from_transcript(raw, {"entries": [{"role": "assistant", "text": json.dumps(bad)}]}))
+
+    def test_invalid_final_decision_becomes_inconclusive(self) -> None:
+        """A completed malformed answer must finish the visible Check safely."""
+        raw = json.dumps(assignment(), sort_keys=True, separators=(",", ":")).encode()
+        malformed = review()
+        malformed["verdict"] = "proposal-ready"
+        transcript = {"entries": [{"role": "assistant", "text": json.dumps(malformed)}]}
+
+        candidate = adapter._inconclusive_from_invalid_final(raw, transcript)
+
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate["artifact"]["verdict"], "inconclusive")
+        self.assertIsNone(candidate["artifact"]["proposal"])
+        self.assertEqual(candidate["artifact"]["identity"], assignment()["identity"])
 
     def test_dispatch_places_the_immutable_assignment_in_the_city_task(self) -> None:
         source = assignment()

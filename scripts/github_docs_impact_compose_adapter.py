@@ -89,6 +89,49 @@ def _candidate_from_transcript(raw_assignment: bytes, transcript: dict[str, Any]
         return None
 
 
+def _inconclusive_from_invalid_final(raw_assignment: bytes, transcript: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert a completed malformed City response into a safe terminal decision.
+
+    The transcript exporter writes only after the assigned City session has
+    completed.  Waiting for the run deadline after that session returns invalid
+    JSON leaves GitHub's required Check stuck despite there being no more work
+    to await.  This adapter therefore records a credential-free, assignment-
+    bound ``inconclusive`` decision.  It never preserves the malformed verdict
+    or proposal, so it cannot create a follow-up branch or make a Check pass.
+    """
+    if _final_assistant_document(transcript) is None:
+        return None
+    try:
+        assignment = json.loads(raw_assignment)
+        identity = assignment["identity"]
+        skill = assignment["agent_skill"]
+        files = assignment["evidence_bundle"]["files"]
+        evidence = [
+            {"path": item["path"], "evidence": item["reference"]}
+            for item in files
+        ]
+        artifact = {
+            "schema_version": 1,
+            "kind": "github-pr-docs-impact-review",
+            "identity": identity,
+            "agent_skill": skill,
+            "verdict": "inconclusive",
+            "rationale": "The City reviewer completed but returned an invalid final decision; human review is required.",
+            "evidence": evidence,
+            "confidence": 0.0,
+            "proposal": None,
+        }
+        envelope = {
+            "schema_version": 1,
+            "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(),
+            "artifact": artifact,
+        }
+        import github_intake_docs_patch_worker as worker
+        return worker.validate_final_candidate(raw_assignment, envelope)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _harvest_city_candidates() -> list[str]:
     """Bridge a completed City transcript into the trusted candidate outbox.
 
@@ -115,6 +158,8 @@ def _harvest_city_candidates() -> list[str]:
             transcript_path = review_root.parent / "transcripts" / f"{digest}.json"
             transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else {}
             candidate = _candidate_from_transcript(raw_assignment, transcript)
+            if candidate is None:
+                candidate = _inconclusive_from_invalid_final(raw_assignment, transcript)
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             continue
         if candidate is None:
