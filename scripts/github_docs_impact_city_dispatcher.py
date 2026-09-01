@@ -118,7 +118,7 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
     output = peek.get("output")
     if not isinstance(output, str):
         return None
-    compact = "".join(output.splitlines())
+    compact = "".join(line.strip() for line in output.splitlines())
     decoder = json.JSONDecoder()
     review: dict[str, object] | None = None
     for index, char in enumerate(compact):
