@@ -4,6 +4,7 @@ set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 compose="$root/compose.yaml"
 rules="$root/config/github-intake/rules.toml"
+ci_workflow="$root/.github/workflows/ci.yml"
 
 require() {
   local pattern=$1 file=$2
@@ -23,6 +24,10 @@ if grep -Fq '${GITHUB_PACK_DIR:-' "$compose"; then
   exit 1
 fi
 require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub pack checkout' "$compose"
+# Keep CI's fixture environment aligned with compose's required reviewer
+# inputs, so interpolation failures are caught before GitHub Actions runs.
+require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
+require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
 require 'city:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
