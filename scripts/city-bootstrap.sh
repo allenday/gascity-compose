@@ -22,8 +22,11 @@ fi
 # prevents the first unprivileged City bootstrap from writing GC_HOME.
 city_uid="$(value HOST_UID)"; city_uid="${city_uid:-1000}"
 city_gid="$(value HOST_GID)"; city_gid="${city_gid:-1000}"
-case "$city_uid:$city_gid" in
-  *[!0-9:]* | :* | *:) printf '%s\n' 'ERROR: HOST_UID and HOST_GID must be numeric when set' >&2; exit 1 ;;
+case "$city_uid" in
+  '' | *[!0-9]*) printf '%s\n' 'ERROR: HOST_UID and HOST_GID must be numeric when set' >&2; exit 1 ;;
+esac
+case "$city_gid" in
+  '' | *[!0-9]*) printf '%s\n' 'ERROR: HOST_UID and HOST_GID must be numeric when set' >&2; exit 1 ;;
 esac
 mkdir -p state/gc-runtime
 chown -R "$city_uid:$city_gid" state/gc-runtime

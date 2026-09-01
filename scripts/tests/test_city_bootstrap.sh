@@ -28,6 +28,8 @@ require 'ERROR: rig registration missing from city config'
 # writable before this bootstrap invokes `gc` in that container.
 require 'city_uid="$(value HOST_UID)"; city_uid="${city_uid:-1000}"'
 require 'city_gid="$(value HOST_GID)"; city_gid="${city_gid:-1000}"'
+require 'case "$city_uid" in'
+require 'case "$city_gid" in'
 require 'mkdir -p state/gc-runtime'
 require 'chown -R "$city_uid:$city_gid" state/gc-runtime'
 require 'chmod 0700 state/gc-runtime'
@@ -50,6 +52,7 @@ fi
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/city" "$fixture/rig"
+chmod 0755 "$fixture"
 : > "$fixture/city/city.toml"
 cat > "$fixture/bin/docker" <<'EOF'
 #!/bin/sh
@@ -71,21 +74,47 @@ cat > "$fixture/bin/rg" <<'EOF'
 exit 1
 EOF
 chmod 0755 "$fixture/bin/rg"
+fixture_uid="$(id -u)"
+fixture_gid="$(id -g)"
+if [ "$fixture_uid" -eq 0 ]; then
+  fixture_uid=65534
+  fixture_gid=65534
+fi
 cat > "$fixture/city.env" <<EOF
 CITY_DIR=$fixture/city
 MY_PROJECT_DIR=$fixture/rig
 GC_CITY_DOCS_REVIEW_RIG_DIR=$fixture/rig
 CITY_NAME=fixture-city
-HOST_UID=$(id -u)
-HOST_GID=$(id -g)
+HOST_UID=$fixture_uid
+HOST_GID=$fixture_gid
 EOF
+mkdir -p "$fixture/state/gc-runtime"
+if [ "$(id -u)" -eq 0 ]; then
+  chown 0:0 "$fixture/state/gc-runtime"
+fi
+chmod 0700 "$fixture/state/gc-runtime"
 (
   cd "$fixture"
   PATH="$fixture/bin:$PATH" TEST_CITY_BOOTSTRAP_RIG="$fixture/rig" ENV_FILE="$fixture/city.env" sh "$script" >/dev/null
 )
-[ "$(stat -c '%u:%g:%a' "$fixture/state/gc-runtime")" = "$(id -u):$(id -g):700" ] || {
+[ "$(stat -c '%u:%g:%a' "$fixture/state/gc-runtime")" = "$fixture_uid:$fixture_gid:700" ] || {
   printf '%s\n' 'City bootstrap did not provision a private HOST_UID:GID runtime directory' >&2
   exit 1
 }
+if [ "$(id -u)" -eq 0 ]; then
+  setpriv --reuid="$fixture_uid" --regid="$fixture_gid" --clear-groups sh -c 'touch "$1/.bootstrap-write-probe"' sh "$fixture/state/gc-runtime"
+else
+  touch "$fixture/state/gc-runtime/.bootstrap-write-probe"
+fi
+
+sed -i 's/^HOST_UID=.*/HOST_UID=65534:65535/' "$fixture/city.env"
+if (
+  cd "$fixture"
+  PATH="$fixture/bin:$PATH" TEST_CITY_BOOTSTRAP_RIG="$fixture/rig" ENV_FILE="$fixture/city.env" sh "$script"
+) >"$fixture/invalid.out" 2>&1; then
+  printf '%s\n' 'City bootstrap accepted a malformed HOST_UID' >&2
+  exit 1
+fi
+grep -Fq 'ERROR: HOST_UID and HOST_GID must be numeric when set' "$fixture/invalid.out"
 
 printf '%s\n' 'PASS: city bootstrap fails closed on rig registration'
