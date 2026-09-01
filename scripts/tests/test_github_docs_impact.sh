@@ -119,6 +119,7 @@ if grep -Fq 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.
 fi
 require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
 require 'github-docs-impact-city-dispatcher' "$root/docker/city-entrypoint.sh"
+require '127\.0\.0\.1:8372/api/health' "$root/docker/city-entrypoint.sh"
 require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
 require 'city-docs-impact.toml' "$root/docker/city-entrypoint.sh"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-docs-impact.toml"

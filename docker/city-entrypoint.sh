@@ -92,7 +92,15 @@ fi
 # this process is allowed to sling it: it has the live supervisor connection,
 # unlike the credentialed GitHub services.
 if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
-  /usr/local/bin/github-docs-impact-city-dispatcher &
+  (
+    # Never let the dispatcher invoke `gc` while this entrypoint is still
+    # starting the supervisor's Dolt lifecycle.  That would create a competing
+    # controller and can leave both processes unable to acquire the store.
+    until curl -fsS http://127.0.0.1:8372/api/health >/dev/null 2>&1; do
+      sleep 2
+    done
+    exec /usr/local/bin/github-docs-impact-city-dispatcher
+  ) &
 fi
 
 exec gc supervisor run
