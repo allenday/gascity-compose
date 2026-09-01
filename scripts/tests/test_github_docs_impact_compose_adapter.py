@@ -123,6 +123,23 @@ class CandidateBridgeTests(unittest.TestCase):
         assert candidate is not None
         self.assertEqual(candidate["artifact"]["verdict"], "inconclusive")
 
+    def test_invalid_completion_sentinel_harvests_an_inconclusive_candidate(self) -> None:
+        source = assignment()
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / "assignments").mkdir()
+            (root / "dispatch").mkdir()
+            (root / "transcripts").mkdir()
+            (root / "assignments" / f"{digest}.json").write_bytes(raw)
+            (root / "dispatch" / f"{digest}.json").write_text(json.dumps({"bead_id": "mp-1", "source_key": source["identity"]["source_key"], "dispatched": True}))
+            (root / "transcripts" / f"{digest}.json").write_text(json.dumps({"entries": [{"role": "system", "text": "invalid-final"}]}))
+            with mock.patch.dict(os.environ, {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates")}, clear=False):
+                self.assertEqual(adapter._harvest_city_candidates(), [digest])
+            candidate = json.loads((root / "candidates" / f"{digest}.json").read_text())
+            self.assertEqual(candidate["artifact"]["verdict"], "inconclusive")
+
     def test_dispatch_places_the_immutable_assignment_in_the_city_task(self) -> None:
         source = assignment()
         raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
@@ -197,6 +214,26 @@ class CandidateBridgeTests(unittest.TestCase):
             result = [
                 mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed"}]), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"output": "review could not be completed"}), stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result):
+                self.assertEqual(dispatcher.export_transcripts(), [digest])
+            transcript = json.loads((root / "transcripts" / f"{digest}.json").read_text())
+            self.assertEqual(transcript, {"entries": [{"role": "system", "text": "invalid-final"}]})
+
+    def test_city_export_marks_closed_wrong_identity_as_invalid_final(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            wrong = review()
+            wrong["identity"] = {**wrong["identity"], "source_key": "github-pr:17:9:" + "b" * 40}
+            result = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": json.dumps(wrong)}), stderr=""),
             ]
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result):

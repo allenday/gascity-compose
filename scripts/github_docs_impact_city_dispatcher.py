@@ -225,6 +225,14 @@ def _quarantine_stale_transcript(path: pathlib.Path) -> None:
     path.replace(rejected / f"{path.stem}.{time.time_ns()}{path.suffix}")
 
 
+def _write_invalid_final(path: pathlib.Path, *, replace_stale: bool) -> None:
+    """Record only the terminal failure marker; never persist raw agent prose."""
+    transcript = {"entries": [{"role": "system", "text": "invalid-final"}]}
+    if replace_stale:
+        _quarantine_stale_transcript(path)
+    _atomic_write(path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+
+
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
@@ -260,14 +268,14 @@ def export_transcripts() -> list[str]:
                 # the Check as inconclusive rather than wait for its deadline.
                 if bead_json.get("status") != "closed":
                     continue
-                transcript = {"entries": [{"role": "system", "text": "invalid-final"}]}
-                if replace_stale:
-                    _quarantine_stale_transcript(transcript_path)
-                _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+                _write_invalid_final(transcript_path, replace_stale=replace_stale)
                 exported.append(marker_path.stem)
                 continue
             identity = review.get("identity")
             if not isinstance(identity, dict) or identity.get("source_key") != marker_json["source_key"]:
+                if bead_json.get("status") == "closed":
+                    _write_invalid_final(transcript_path, replace_stale=replace_stale)
+                    exported.append(marker_path.stem)
                 continue
             transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
             if replace_stale:
