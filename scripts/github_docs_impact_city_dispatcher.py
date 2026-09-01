@@ -44,13 +44,21 @@ def _pending_marker(path: pathlib.Path) -> dict[str, str] | None:
     return {"bead_id": bead_id, "source_key": source_key}
 
 
+def _reviewer_target() -> tuple[str, str]:
+    target = os.environ.get("GC_CITY_DOCS_REVIEW_TARGET", "").strip()
+    rig, separator, agent = target.partition("/")
+    if not rig or not separator or not agent:
+        raise ValueError("GC_CITY_DOCS_REVIEW_TARGET must be a qualified <rig>/<agent> name")
+    return rig, target
+
+
 def dispatch_pending() -> list[str]:
     """Sling each pending request once, and acknowledge only on success."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
-    target = os.environ.get("GC_CITY_DOCS_REVIEW_TARGET", "").strip()
-    if not review_dir or not city or not target:
+    if not review_dir or not city:
         raise ValueError("GC_CITY_DOCS_REVIEW_DIR, CITY_PATH, and GC_CITY_DOCS_REVIEW_TARGET are required")
+    _, target = _reviewer_target()
     dispatched: list[str] = []
     for marker_path in sorted((review_dir / "dispatch").glob("*.json")):
         marker = _pending_marker(marker_path)
@@ -76,6 +84,7 @@ def create_pending() -> list[str]:
     city = os.environ.get("CITY_PATH", "").strip()
     if not review_dir or not city:
         raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, _ = _reviewer_target()
     created: list[str] = []
     for request_path in sorted((review_dir / "requests").glob("*.json")):
         digest = request_path.stem
@@ -89,7 +98,7 @@ def create_pending() -> list[str]:
                 continue
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
-        result = subprocess.run(["gc", "--city", city, "--rig", "gascity", "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"], capture_output=True, text=True, check=False, timeout=45)
+        result = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"], capture_output=True, text=True, check=False, timeout=45)
         if result.returncode:
             continue
         try:
@@ -126,6 +135,7 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
+    rig, _ = _reviewer_target()
     exported: list[str] = []
     for marker_path in sorted((review_dir / "dispatch").glob("*.json")):
         marker = _pending_marker(marker_path)
@@ -136,7 +146,7 @@ def export_transcripts() -> list[str]:
             if marker_json.get("dispatched") is not True: continue
             transcript_path = review_dir / "transcripts" / marker_path.name
             if transcript_path.exists(): continue
-            bead = subprocess.run(["gc", "--city", city, "--rig", "gascity", "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
+            bead = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
             if bead.returncode: continue
             bead_json = json.loads(bead.stdout)
             if isinstance(bead_json, list): bead_json = bead_json[0]

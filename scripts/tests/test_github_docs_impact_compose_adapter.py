@@ -99,6 +99,18 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "gascity/github-docs-impact.docs-impact-reviewer"])
             self.assertEqual(json.loads(marker.read_text()), {"bead_id": "bead-1", "source_key": "github-pr:17:9:" + SHA, "dispatched": True})
 
+    def test_city_dispatcher_creates_review_work_in_the_target_rig(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            request = root / "requests" / ("d" * 64 + ".json")
+            request.parent.mkdir()
+            request.write_text(json.dumps({"source_key": "github-pr:17:9:" + SHA, "description": "review", "metadata": "{}"}))
+            result = mock.Mock(returncode=0, stdout=json.dumps({"id": "mp-1"}), stderr="")
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=result) as command:
+                self.assertEqual(dispatcher.create_pending(), [request.stem])
+            self.assertEqual(command.call_args.args[0][:6], ["gc", "--city", "/city", "--rig", "my-project", "bd"])
+
     def test_city_peek_export_recovers_only_the_canonical_review_object(self) -> None:
         rendered = "intro\n• " + json.dumps(review()) + "\n\n› Implement {feature}"
         self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
