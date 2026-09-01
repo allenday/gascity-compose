@@ -70,6 +70,40 @@ def dispatch_pending() -> list[str]:
     return dispatched
 
 
+def create_pending() -> list[str]:
+    """Create reviewer Beads through City's managed store, never a sidecar."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    created: list[str] = []
+    for request_path in sorted((review_dir / "requests").glob("*.json")):
+        digest = request_path.stem
+        dispatch_path = review_dir / "dispatch" / f"{digest}.json"
+        if dispatch_path.exists():
+            continue
+        try:
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            source_key, description, metadata = request["source_key"], request["description"], request["metadata"]
+            if not all(isinstance(value, str) and value for value in (source_key, description, metadata)):
+                continue
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        result = subprocess.run(["gc", "--city", city, "--rig", "gascity", "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"], capture_output=True, text=True, check=False, timeout=45)
+        if result.returncode:
+            continue
+        try:
+            response = json.loads(result.stdout)
+            if isinstance(response, list): response = response[0]
+            bead_id = response["id"]
+            if not isinstance(bead_id, str) or not bead_id: continue
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, IndexError):
+            continue
+        _atomic_write(dispatch_path, json.dumps({"bead_id": bead_id, "source_key": source_key, "dispatched": False}, sort_keys=True, separators=(",", ":")).encode())
+        created.append(digest)
+    return created
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
@@ -77,7 +111,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"dispatched": dispatch_pending()}, sort_keys=True), flush=True)
+            print(json.dumps({"created": create_pending(), "dispatched": dispatch_pending()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

@@ -214,6 +214,24 @@ def _dispatch_city(run: dict[str, Any]) -> None:
     if not assignment_path.exists():
         _atomic_write(assignment_path, assignment_bytes, mode=0o400)
 
+    identity = run["assignment"]["identity"]
+    candidate_path = _path_env("GC_GITHUB_DOCS_CANDIDATE_DIR") / f"{digest}.json"
+    description = "\n".join((
+        "Review the immutable GitHub pull-request documentation assignment.",
+        "The JSON below is the complete, SHA-bound record. Do not fetch other state.", "",
+        assignment_bytes.decode("utf-8"), "", f"Source key: {identity['source_key']}",
+        "Return one canonical github-pr-docs-impact-review JSON decision bound to the assignment.",
+        "Do not use GitHub credentials, network access, or mutate GitHub.",
+    ))
+    metadata = json.dumps({"github.docs_review.assignment_sha256": digest, "github.docs_review.candidate_path": str(candidate_path)}, sort_keys=True)
+    request_path = review_root.parent / "requests" / f"{digest}.json"
+    request = {"source_key": identity["source_key"], "description": description, "metadata": metadata}
+    if request_path.exists() and json.loads(request_path.read_text(encoding="utf-8")) != request:
+        raise ValueError("immutable City review request collision")
+    if not request_path.exists():
+        _atomic_write(request_path, _assignment_bytes(request))
+    return
+
     dispatch_marker = review_root.parent / "dispatch" / f"{digest}.json"
     identity = run["assignment"]["identity"]
     city = os.environ.get("GC_CITY_ROOT", "").strip()

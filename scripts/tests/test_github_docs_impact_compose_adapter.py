@@ -80,18 +80,13 @@ class CandidateBridgeTests(unittest.TestCase):
             root = pathlib.Path(temp)
             run = {"assignment_bytes": __import__("base64").b64encode(raw).decode(), "assignment": source}
             with mock.patch.dict(os.environ, {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates"), "GC_CITY_ROOT": "/city"}, clear=False), mock.patch.object(adapter.subprocess, "run") as command:
-                command.return_value = mock.Mock(returncode=0, stdout='{"id":"bead-1"}', stderr="")
                 adapter._dispatch_city(run)
-
-            create = command.call_args_list[0].args[0]
-            description = create[create.index("--description") + 1]
+            request = json.loads((root / "requests" / f"{digest}.json").read_text())
+            description = request["description"]
             self.assertIn(raw.decode(), description)
             self.assertNotIn(f"assignments/{digest}.json", description)
-            self.assertEqual(command.call_count, 1)
-            self.assertEqual(
-                json.loads((root / "dispatch" / f"{digest}.json").read_text()),
-                {"bead_id": "bead-1", "source_key": source["identity"]["source_key"], "dispatched": False},
-            )
+            self.assertEqual(command.call_count, 0)
+            self.assertEqual(request["source_key"], source["identity"]["source_key"])
 
     def test_city_dispatcher_slings_only_pending_durable_requests(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
