@@ -124,6 +124,7 @@ require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
 require 'city-docs-impact.toml' "$root/docker/city-entrypoint.sh"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-docs-impact.toml"
 require '^name = "github-docs-impact\.docs-impact-reviewer"$' "$root/config/city-docs-impact.toml"
+require '^work_dir = "\.gc/agents/\{\{\.AgentBase\}\}"$' "$root/config/city-docs-impact.toml"
 require 'gpt-5\.6-terra' "$root/config/city-docs-impact.toml"
 require 'model_reasoning_effort=medium' "$root/config/city-docs-impact.toml"
 

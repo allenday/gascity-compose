@@ -142,11 +142,15 @@ def export_transcripts() -> list[str]:
             if isinstance(bead_json, list): bead_json = bead_json[0]
             session_id = bead_json.get("assignee") if isinstance(bead_json, dict) else None
             if not isinstance(session_id, str) or not session_id: continue
-            result = subprocess.run(["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"], capture_output=True, text=True, check=False, timeout=20)
-            if result.returncode: continue
-            review = _review_from_peek(json.loads(result.stdout))
-            if review is None: continue
-            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
+            result = subprocess.run(["gc", "--city", city, "session", "logs", session_id, "--tail", "5", "--json"], capture_output=True, text=True, check=False, timeout=20)
+            if result.returncode == 0:
+                transcript = json.loads(result.stdout)
+            else:
+                result = subprocess.run(["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"], capture_output=True, text=True, check=False, timeout=20)
+                if result.returncode: continue
+                review = _review_from_peek(json.loads(result.stdout))
+                if review is None: continue
+                transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
             exported.append(marker_path.stem)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
