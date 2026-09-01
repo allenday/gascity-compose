@@ -30,10 +30,21 @@ Prometheus scrape targets.
 
 Enable the complete GitHub profile with the initial App credentials in ignored
 `.env` or an already-imported protected intake state. Before starting it, set
-`GITHUB_PACK_DIR` to an absolute pack checkout. Validate those prerequisites
-with:
+the absolute pack checkout and City review-rig settings:
+
+```dotenv
+GITHUB_PACK_DIR=/absolute/path/to/gascity-packs
+GC_CITY_DOCS_REVIEW_RIG_DIR=/absolute/path/to/my-project
+GC_CITY_DOCS_REVIEW_TARGET=my-project/github-docs-impact.docs-impact-reviewer
+```
+
+`GC_CITY_DOCS_REVIEW_TARGET` is the qualified `<rig>/<agent>` name. The
+`city-bootstrap` target registers `GC_CITY_DOCS_REVIEW_RIG_DIR` under its path
+basename, so the example above uses `my-project` for both the directory name
+and target rig. Run the bootstrap before the preflight:
 
 ```bash
+make city-bootstrap ENV_FILE=.env
 make github-docs-impact-preflight ENV_FILE=.env
 ```
 
