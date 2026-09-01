@@ -58,6 +58,10 @@ if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
   gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact
 fi
 
+# Materialize imported agents before applying the provider patch below.  A
+# fresh City has no merged reviewer definition until this first install.
+gc --city "$CITY_PATH" import install
+
 # The imported agent deliberately has no provider of its own. Bind it to this
 # fixed, credential-free Codex lane exactly once, so a dispatch produces a
 # real reviewer session instead of merely recording a routed bead.
