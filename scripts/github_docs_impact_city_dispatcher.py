@@ -105,7 +105,7 @@ def retire_superseded() -> list[str]:
         except (OSError, ValueError, json.JSONDecodeError):
             continue
         result = subprocess.run(
-            ["gc", "--city", city, "--rig", rig, "bd", "close", bead_id, "--reason", "Superseded by a newer GitHub pull-request revision", "--json"],
+            ["gc", "--city", city, "--rig", rig, "bd", "close", bead_id, "--force", "--reason", "Superseded by a newer GitHub pull-request revision", "--json"],
             capture_output=True,
             text=True,
             check=False,

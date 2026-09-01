@@ -127,7 +127,7 @@ class CandidateBridgeTests(unittest.TestCase):
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=result) as command:
                 self.assertEqual(dispatcher.retire_superseded(), [older])
-            self.assertEqual(command.call_args.args[0], ["gc", "--city", "/city", "--rig", "my-project", "bd", "close", "mp-old", "--reason", "Superseded by a newer GitHub pull-request revision", "--json"])
+            self.assertEqual(command.call_args.args[0], ["gc", "--city", "/city", "--rig", "my-project", "bd", "close", "mp-old", "--force", "--reason", "Superseded by a newer GitHub pull-request revision", "--json"])
             self.assertEqual(json.loads(marker.read_text())["dispatched"], "retired")
 
     def test_city_peek_export_recovers_only_the_canonical_review_object(self) -> None:
