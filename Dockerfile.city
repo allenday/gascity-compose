@@ -48,12 +48,13 @@ COPY --from=codex /out/codex/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex
 COPY --from=dolt /usr/local/bin/dolt /usr/local/bin/dolt
 COPY docker/city-entrypoint.sh /usr/local/bin/city-entrypoint
+COPY scripts/github_docs_impact_city_dispatcher.py /usr/local/bin/github-docs-impact-city-dispatcher
 COPY scripts/city-mail-wake.sh /usr/local/bin/city-mail-wake
 COPY scripts/city-mail-local-launch.sh /usr/local/bin/city-mail-local-launch
 COPY scripts/city_mail_launcher.py /usr/local/bin/city_mail_launcher.py
 COPY scripts/city-mail-mcp-proxy.py /usr/local/bin/city-mail-mcp-proxy
 COPY scripts/codex-mayor /usr/local/bin/codex-mayor
-RUN chmod 0755 /usr/local/bin/city-entrypoint /usr/local/bin/city-mail-wake /usr/local/bin/city-mail-local-launch /usr/local/bin/city-mail-mcp-proxy /usr/local/bin/codex-mayor && mkdir -p /var/lib/gascity && chown -R node:node /var/lib/gascity
+RUN chmod 0755 /usr/local/bin/city-entrypoint /usr/local/bin/github-docs-impact-city-dispatcher /usr/local/bin/city-mail-wake /usr/local/bin/city-mail-local-launch /usr/local/bin/city-mail-mcp-proxy /usr/local/bin/codex-mayor && mkdir -p /var/lib/gascity && chown -R node:node /var/lib/gascity
 USER node
 WORKDIR /city
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/city-entrypoint"]

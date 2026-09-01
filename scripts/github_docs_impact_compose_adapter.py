@@ -200,7 +200,7 @@ class ComposeAdapter:
 
 
 def _dispatch_city(run: dict[str, Any]) -> None:
-    """Persist the exact assignment before creating a City task and sling."""
+    """Persist an immutable task; the City-local dispatcher performs the sling."""
     raw = run.get("assignment_bytes")
     if not isinstance(raw, str):
         raise ValueError("durable run lacks assignment bytes")
@@ -271,13 +271,9 @@ def _dispatch_city(run: dict[str, Any]) -> None:
         _atomic_write(dispatch_marker, _assignment_bytes(marker))
     else:
         bead_id = marker["bead_id"]
-    try:
-        sling = subprocess.run(["gc", "--city", city, "sling", target, bead_id, "--force", "--no-convoy", "--no-formula", "--nudge", "--json"], capture_output=True, text=True, check=False, timeout=45)
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError("City timed out dispatching docs review task") from exc
-    if sling.returncode:
-        raise ValueError(sling.stderr.strip() or "City could not dispatch docs review task")
-    _atomic_write(dispatch_marker, _assignment_bytes({"bead_id": bead_id, "source_key": identity["source_key"], "dispatched": True}))
+    # The request remains durable and pending until the process inside the
+    # actual City supervisor marks it dispatched. Retrying this action will
+    # reuse its bead rather than creating a second review.
 
 
 def intake(payload: dict[str, Any], token: str, now: float) -> dict[str, Any]:

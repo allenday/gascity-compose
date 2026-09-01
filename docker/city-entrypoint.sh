@@ -71,4 +71,11 @@ if [ "${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-local-launch &
 fi
 
+# The GitHub runtime records a pending dispatch in shared durable state.  Only
+# this process is allowed to sling it: it has the live supervisor connection,
+# unlike the credentialed GitHub services.
+if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
+  /usr/local/bin/github-docs-impact-city-dispatcher &
+fi
+
 exec gc supervisor run

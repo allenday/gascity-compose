@@ -22,6 +22,15 @@ adapter = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = adapter
 spec.loader.exec_module(adapter)
 
+dispatcher_spec = importlib.util.spec_from_file_location(
+    "github_docs_impact_city_dispatcher",
+    pathlib.Path(__file__).resolve().parents[1] / "github_docs_impact_city_dispatcher.py",
+)
+assert dispatcher_spec and dispatcher_spec.loader
+dispatcher = importlib.util.module_from_spec(dispatcher_spec)
+sys.modules[dispatcher_spec.name] = dispatcher
+dispatcher_spec.loader.exec_module(dispatcher)
+
 
 SHA = "a" * 40
 
@@ -71,13 +80,29 @@ class CandidateBridgeTests(unittest.TestCase):
             root = pathlib.Path(temp)
             run = {"assignment_bytes": __import__("base64").b64encode(raw).decode(), "assignment": source}
             with mock.patch.dict(os.environ, {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates"), "GC_CITY_ROOT": "/city"}, clear=False), mock.patch.object(adapter.subprocess, "run") as command:
-                command.side_effect = [mock.Mock(returncode=0, stdout='{"id":"bead-1"}', stderr=""), mock.Mock(returncode=0, stdout="{}", stderr="")]
+                command.return_value = mock.Mock(returncode=0, stdout='{"id":"bead-1"}', stderr="")
                 adapter._dispatch_city(run)
 
             create = command.call_args_list[0].args[0]
             description = create[create.index("--description") + 1]
             self.assertIn(raw.decode(), description)
             self.assertNotIn(f"assignments/{digest}.json", description)
+            self.assertEqual(command.call_count, 1)
+            self.assertEqual(
+                json.loads((root / "dispatch" / f"{digest}.json").read_text()),
+                {"bead_id": "bead-1", "source_key": source["identity"]["source_key"], "dispatched": False},
+            )
+
+    def test_city_dispatcher_slings_only_pending_durable_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            marker = root / "dispatch" / ("d" * 64 + ".json")
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "bead-1", "source_key": "github-pr:17:9:" + SHA, "dispatched": False}))
+            with mock.patch.dict(os.environ, {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "gascity/github-docs-impact.docs-impact-reviewer"}, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="{}", stderr="")) as command:
+                self.assertEqual(dispatcher.dispatch_pending(), [marker.stem])
+            self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "gascity/github-docs-impact.docs-impact-reviewer"])
+            self.assertEqual(json.loads(marker.read_text()), {"bead_id": "bead-1", "source_key": "github-pr:17:9:" + SHA, "dispatched": True})
 
 
 if __name__ == "__main__":

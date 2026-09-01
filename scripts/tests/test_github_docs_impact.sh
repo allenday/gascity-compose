@@ -118,6 +118,8 @@ if grep -Fq 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.
   exit 1
 fi
 require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
+require 'github-docs-impact-city-dispatcher' "$root/docker/city-entrypoint.sh"
+require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-cost-safe.toml"
 require 'gpt-5\.6-terra' "$root/config/city-cost-safe.toml"
 require 'model_reasoning_effort=medium' "$root/config/city-cost-safe.toml"
