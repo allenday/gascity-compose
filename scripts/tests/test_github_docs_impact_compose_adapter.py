@@ -7,12 +7,36 @@ import os
 import pathlib
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
 
-PACK_SCRIPTS = pathlib.Path("/root/src/gascity-packs/github/scripts")
-os.environ["GC_GITHUB_PACK_SCRIPTS"] = str(PACK_SCRIPTS)
+# The adapter's lifecycle dependencies are supplied by the mounted GitHub
+# pack at runtime. These unit tests exercise only Compose-owned dispatch and
+# candidate helpers, so replace that external boundary with empty modules.
+# This keeps CI independent of a sibling checkout that GitHub Actions lacks.
+for module_name in (
+    "github_intake_common",
+    "github_intake_docs_impact",
+    "github_intake_docs_review_runtime",
+):
+    sys.modules[module_name] = types.ModuleType(module_name)
+
+
+def _validate_final_candidate(raw_assignment: bytes, envelope: dict[str, object]) -> dict[str, object]:
+    """Minimal boundary double; pack tests own candidate-schema validation."""
+    assignment = json.loads(raw_assignment)
+    artifact = envelope.get("artifact")
+    if not isinstance(artifact, dict) or artifact.get("identity") != assignment.get("identity"):
+        raise ValueError("candidate identity must match its immutable assignment")
+    return envelope
+
+
+worker = types.ModuleType("github_intake_docs_patch_worker")
+worker.validate_final_candidate = _validate_final_candidate
+sys.modules[worker.__name__] = worker
+
 spec = importlib.util.spec_from_file_location(
     "github_docs_impact_compose_adapter",
     pathlib.Path(__file__).resolve().parents[1] / "github_docs_impact_compose_adapter.py",
