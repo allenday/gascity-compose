@@ -16,6 +16,19 @@ if compose ps --status running --services city | rg -Fx city >/dev/null; then
   printf '%s\n' 'ERROR: City is running; stop it before bootstrap to preserve the single-supervisor invariant.' >&2
   exit 1
 fi
+
+# Compose runs City and its two docs-impact helpers as HOST_UID:GID. Docker
+# otherwise creates this ignored bind mount as root on a fresh host, which
+# prevents the first unprivileged City bootstrap from writing GC_HOME.
+city_uid="$(value HOST_UID)"; city_uid="${city_uid:-1000}"
+city_gid="$(value HOST_GID)"; city_gid="${city_gid:-1000}"
+case "$city_uid:$city_gid" in
+  *[!0-9:]* | :* | *:) printf '%s\n' 'ERROR: HOST_UID and HOST_GID must be numeric when set' >&2; exit 1 ;;
+esac
+mkdir -p state/gc-runtime
+chown -R "$city_uid:$city_gid" state/gc-runtime
+chmod 0700 state/gc-runtime
+
 gc() {
   compose run --rm --no-deps --entrypoint sh city -ec '
     dolt config --global --add user.name "${DOLT_USER_NAME:-Allen Day}"
