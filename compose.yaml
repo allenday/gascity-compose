@@ -68,7 +68,7 @@ services:
       # Reuse the protected App configuration imported by the prior service.
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /root/.gc
+      GC_HOME: /var/lib/gascity
       BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
       GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
@@ -87,7 +87,7 @@ services:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/root/.gc
+      - ./state/gc-runtime:/var/lib/gascity
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -105,7 +105,7 @@ services:
     environment:
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /root/.gc
+      GC_HOME: /var/lib/gascity
       BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
       GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
@@ -124,7 +124,7 @@ services:
       - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/root/.gc
+      - ./state/gc-runtime:/var/lib/gascity
     network_mode: "service:city"
     security_opt:
       - no-new-privileges:true
@@ -147,10 +147,11 @@ services:
         GASCITY_REPOSITORY: ${GASCITY_REPOSITORY:-https://github.com/gastownhall/gascity.git}
         CAGENT_REF: ${CAGENT_REF:-v1.23.0}
     environment:
-      GC_HOME: /root/.gc
-      # gc's platform supervisor requires the container user's real HOME;
-      # GC_HOME remains the isolated runtime state location.
-      HOME: /root
+      GC_HOME: /var/lib/gascity
+      # gc's platform supervisor requires the container user's real HOME.
+      # Keep both writable paths outside /root because the service runs as
+      # the configured unprivileged host UID/GID.
+      HOME: /var/lib/gascity/home
       CITY_PATH: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       CITY_NAME: ${CITY_NAME:-my-city}
       GC_OTEL_METRICS_URL: http://otel-collector:4318/v1/metrics
@@ -204,7 +205,7 @@ services:
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
       - ./state/github-intake/docs-review:/var/lib/github-docs-impact/review
-      - ./state/gc-runtime:/root/.gc
+      - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
       # which copies the read-only host credential into this ephemeral home.

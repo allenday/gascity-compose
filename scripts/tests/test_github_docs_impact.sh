@@ -91,6 +91,8 @@ require_runtime 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
 require_runtime 'network_mode: "service:city"'
 require_runtime 'restart: unless-stopped'
+require_runtime 'GC_HOME: /var/lib/gascity'
+require_runtime 'state/gc-runtime:/var/lib/gascity'
 forbid_runtime '^    ports:'
 
 require_city() {
@@ -116,6 +118,13 @@ require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
+# City runs as HOST_UID:GID, so its supervisor state and real home must not
+# live below /root (which an unprivileged container user cannot traverse).
+require_city 'GC_HOME: /var/lib/gascity'
+require_city 'HOME: /var/lib/gascity/home'
+require_city 'state/gc-runtime:/var/lib/gascity'
+forbid_city 'GC_HOME: /root'
+forbid_city 'HOME: /root'
 forbid_city 'GITHUB_(APP|WEBHOOK|TOKEN|INTAKE).*:'
 
 if grep -Fq 'github_intake_city_docs_launcher.py' "$root/docker/city-entrypoint.sh"; then
@@ -167,6 +176,6 @@ require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
 require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
 require_webhook 'network_mode: "service:city"'
-require_webhook 'GC_HOME: /root/.gc'
-require_webhook 'state/gc-runtime:/root/.gc'
+require_webhook 'GC_HOME: /var/lib/gascity'
+require_webhook 'state/gc-runtime:/var/lib/gascity'
 require_webhook 'github_docs_impact_webhook.py'
