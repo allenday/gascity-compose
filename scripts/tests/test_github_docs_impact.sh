@@ -120,9 +120,11 @@ fi
 require '/opt/gascity-packs/github' "$root/docker/city-entrypoint.sh"
 require 'github-docs-impact-city-dispatcher' "$root/docker/city-entrypoint.sh"
 require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
-require '^\[providers\.codex-docs-impact\]$' "$root/config/city-cost-safe.toml"
-require 'gpt-5\.6-terra' "$root/config/city-cost-safe.toml"
-require 'model_reasoning_effort=medium' "$root/config/city-cost-safe.toml"
+require 'city-docs-impact.toml' "$root/docker/city-entrypoint.sh"
+require '^\[providers\.codex-docs-impact\]$' "$root/config/city-docs-impact.toml"
+require '^name = "github-docs-impact\.docs-impact-reviewer"$' "$root/config/city-docs-impact.toml"
+require 'gpt-5\.6-terra' "$root/config/city-docs-impact.toml"
+require 'model_reasoning_effort=medium' "$root/config/city-docs-impact.toml"
 
 if [ "$(grep -Fc '/run/secrets/codex-auth.json' "$compose")" -ne 1 ]; then
   echo 'Codex auth must be mounted only into the trusted City service' >&2

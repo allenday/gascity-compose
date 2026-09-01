@@ -58,6 +58,23 @@ if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
   gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact
 fi
 
+# The imported agent deliberately has no provider of its own. Bind it to this
+# fixed, credential-free Codex lane exactly once, so a dispatch produces a
+# real reviewer session instead of merely recording a routed bead.
+if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
+  compose_dir="$CITY_PATH/.gc/compose"
+  docs_fragment="$compose_dir/city-docs-impact.toml"
+  mkdir -p "$compose_dir"
+  cp /usr/local/share/gascity-compose/city-docs-impact.toml "$docs_fragment"
+  if ! grep -Fq '.gc/compose/city-docs-impact.toml' "$CITY_PATH/city.toml"; then
+    if grep -Eq '^[[:space:]]*include[[:space:]]*=' "$CITY_PATH/city.toml"; then
+      sed -i '0,/^[[:space:]]*include[[:space:]]*=/{s#]$#, ".gc/compose/city-docs-impact.toml"]#}' "$CITY_PATH/city.toml"
+    else
+      sed -i '1i include = [".gc/compose/city-docs-impact.toml"]' "$CITY_PATH/city.toml"
+    fi
+  fi
+fi
+
 # The city lockfile pins remote packs but the controller cache lives in the
 # Compose runtime mount, not in the source checkout. Populate it on every
 # start; gc import install is idempotent when the lock is already cached.

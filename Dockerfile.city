@@ -49,6 +49,7 @@ RUN ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/
 COPY --from=dolt /usr/local/bin/dolt /usr/local/bin/dolt
 COPY docker/city-entrypoint.sh /usr/local/bin/city-entrypoint
 COPY scripts/github_docs_impact_city_dispatcher.py /usr/local/bin/github-docs-impact-city-dispatcher
+COPY config/city-docs-impact.toml /usr/local/share/gascity-compose/city-docs-impact.toml
 COPY scripts/city-mail-wake.sh /usr/local/bin/city-mail-wake
 COPY scripts/city-mail-local-launch.sh /usr/local/bin/city-mail-local-launch
 COPY scripts/city_mail_launcher.py /usr/local/bin/city_mail_launcher.py

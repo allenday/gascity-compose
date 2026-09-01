@@ -1,0 +1,22 @@
+# Dedicated, credential-free provider binding for the GitHub docs reviewer.
+# This fragment is installed and included by the City entrypoint when the
+# docs-impact profile is enabled; it does not change the City's other lanes.
+
+[providers.codex-docs-impact]
+base = "builtin:codex"
+ready_delay_ms = 0
+args_append = ["--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium"]
+options_schema_merge = "by_key"
+options_schema = [{ key = "model", omit = true }, { key = "effort", omit = true }]
+
+[providers.codex-docs-impact.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
+GITHUB_APP_ID = ""
+GITHUB_APP_PRIVATE_KEY_PEM = ""
+GITHUB_WEBHOOK_SECRET = ""
+
+[[patches.agent]]
+rig = "*"
+name = "github-docs-impact.docs-impact-reviewer"
+provider = "codex-docs-impact"
