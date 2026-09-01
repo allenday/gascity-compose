@@ -1,12 +1,9 @@
 version = 1
 
-# Run the same revision-bound evaluator for every GitHub event that can make a
-# pull request mergeable. The service's durable delivery receipt remains the
-# recovery record; source identity is independently bound to the head SHA.
-# These actions execute in the trusted supervisor. It is the only process that
-# receives the installation token or can publish a GitHub Check Run. Each rule
-# queues an assignment, waits for the isolated worker's exact outbox candidate,
-# then validates, projects, and publishes it through the trusted pipeline.
+# The signed intake has the installation token for this delivery. It uses it
+# once to read every PR-files page, records the exact SHA-bound run, and only
+# then dispatches a City reviewer. Projection happens later in the durable
+# runtime loop with the App's own credentials.
 [[rule]]
 id = "docs-impact-pr-opened"
 event = "pull_request"
@@ -14,7 +11,7 @@ event = "pull_request"
 action = "opened"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+command = ["python3", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "intake", "--once"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -24,7 +21,7 @@ event = "pull_request"
 action = "reopened"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+command = ["python3", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "intake", "--once"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -34,7 +31,7 @@ event = "pull_request"
 action = "synchronize"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+command = ["python3", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "intake", "--once"]
 github_app_token_env = "GH_TOKEN"
 
 [[rule]]
@@ -44,5 +41,5 @@ event = "pull_request"
 action = "ready_for_review"
 [[rule.action]]
 type = "command"
-command = ["python3", "/opt/gascity-packs/github/scripts/github_intake_docs_impact_pipeline.py"]
+command = ["python3", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "intake", "--once"]
 github_app_token_env = "GH_TOKEN"

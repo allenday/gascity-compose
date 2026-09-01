@@ -15,6 +15,9 @@ for template in /run/secrets/codex-config/*.toml.template; do
   envsubst '$TAILNET_OLLAMA_BASE_URL $RUNPOD_OPENAI_BASE_URL $GEMMA_MODEL' \
     < "$template" > "$output"
 done
+# City sessions are non-interactive; an upgrade prompt would otherwise block a
+# reviewer before it can consume its assigned Bead.
+printf '%s\n' 'check_for_update_on_startup = false' >> "${CODEX_HOME:-/run/codex}/config.toml"
 chmod 0600 "${CODEX_HOME:-/run/codex}"/*.toml
 cat > "$GC_HOME/cities.toml" <<EOF
 [[cities]]
@@ -58,6 +61,27 @@ if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ] && \
   gc --city "$CITY_PATH" import add /opt/gascity-packs/github --name github-docs-impact
 fi
 
+# Materialize imported agents before applying the provider patch below.  A
+# fresh City has no merged reviewer definition until this first install.
+gc --city "$CITY_PATH" import install
+
+# The imported agent deliberately has no provider of its own. Bind it to this
+# fixed, credential-free Codex lane exactly once, so a dispatch produces a
+# real reviewer session instead of merely recording a routed bead.
+if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
+  compose_dir="$CITY_PATH/.gc/compose"
+  docs_fragment="$compose_dir/city-docs-impact.toml"
+  mkdir -p "$compose_dir"
+  cp /usr/local/share/gascity-compose/city-docs-impact.toml "$docs_fragment"
+  if ! grep -Fq '.gc/compose/city-docs-impact.toml' "$CITY_PATH/city.toml"; then
+    if grep -Eq '^[[:space:]]*include[[:space:]]*=' "$CITY_PATH/city.toml"; then
+      sed -i '0,/^[[:space:]]*include[[:space:]]*=/{s#]$#, ".gc/compose/city-docs-impact.toml"]#}' "$CITY_PATH/city.toml"
+    else
+      sed -i '1i include = [".gc/compose/city-docs-impact.toml"]' "$CITY_PATH/city.toml"
+    fi
+  fi
+fi
+
 # The city lockfile pins remote packs but the controller cache lives in the
 # Compose runtime mount, not in the source checkout. Populate it on every
 # start; gc import install is idempotent when the lock is already cached.
@@ -71,8 +95,19 @@ if [ "${CITY_MAIL_LOCAL_LAUNCH_ENABLED:-true}" = "true" ]; then
   /usr/local/bin/city-mail-local-launch &
 fi
 
+# The GitHub runtime records a pending dispatch in shared durable state.  Only
+# this process is allowed to sling it: it has the live supervisor connection,
+# unlike the credentialed GitHub services.
 if [ "${GC_CITY_DOCS_REVIEW_ENABLED:-true}" = "true" ]; then
-  python3 -u /opt/gascity-packs/github/scripts/github_intake_city_docs_launcher.py &
+  (
+    # Never let the dispatcher invoke `gc` while this entrypoint is still
+    # starting the supervisor's Dolt lifecycle.  That would create a competing
+    # controller and can leave both processes unable to acquire the store.
+    until curl -fsS http://127.0.0.1:8372/api/health >/dev/null 2>&1; do
+      sleep 2
+    done
+    exec /usr/local/bin/github-docs-impact-city-dispatcher
+  ) &
 fi
 
 exec gc supervisor run

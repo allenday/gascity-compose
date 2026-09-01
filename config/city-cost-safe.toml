@@ -21,23 +21,6 @@ args_append = ["--profile", "mayor"]
 options_schema_merge = "by_key"
 options_schema = [{ key = "model", omit = true }]
 
-# Fixed direct-Codex lane for sanitized GitHub docs evidence. It uses the
-# City's existing CODEX_HOME/auth and exposes no model/API credential to a
-# sidecar. Model and effort cannot be selected by routed bead content.
-[providers.codex-docs-impact]
-base = "builtin:codex"
-ready_delay_ms = 0
-args_append = ["--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium"]
-options_schema_merge = "by_key"
-options_schema = [{ key = "model", omit = true }, { key = "effort", omit = true }]
-
-[providers.codex-docs-impact.env]
-GH_TOKEN = ""
-GITHUB_TOKEN = ""
-GITHUB_APP_ID = ""
-GITHUB_APP_PRIVATE_KEY_PEM = ""
-GITHUB_WEBHOOK_SECRET = ""
-
 [[patches.agent]]
 name = "gastown.deacon"
 provider = "codex-tailnet"
