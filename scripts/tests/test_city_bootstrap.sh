@@ -6,7 +6,7 @@ script="$root/scripts/city-bootstrap.sh"
 
 require() {
   pattern="$1"
-  if ! rg -q --fixed-strings -- "$pattern" "$script"; then
+  if ! grep -Fq -- "$pattern" "$script"; then
     printf '%s\n' "missing bootstrap contract: $pattern" >&2
     exit 1
   fi
@@ -25,7 +25,7 @@ require '--name "$city_name" "$city_dir"'
 require "jq -e --arg rig \"\$rig\" '.rigs[] | select(.path == \$rig)'"
 require 'ERROR: rig registration missing from city config'
 
-if rg -q 'rig add.*\|\| true' "$script"; then
+if grep -Fq '|| true' "$script"; then
   printf '%s\n' 'city bootstrap must not hide rig registration failures' >&2
   exit 1
 fi
