@@ -104,6 +104,25 @@ def create_pending() -> list[str]:
     return created
 
 
+def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
+    """Recover the one-line canonical review from Codex's wrapped terminal view."""
+    output = peek.get("output")
+    if not isinstance(output, str):
+        return None
+    compact = "".join(output.splitlines())
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(compact):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(compact[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value.get("kind") == "github-pr-docs-impact-review":
+            return value
+    return None
+
+
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
@@ -117,10 +136,17 @@ def export_transcripts() -> list[str]:
             if marker_json.get("dispatched") is not True: continue
             transcript_path = review_dir / "transcripts" / marker_path.name
             if transcript_path.exists(): continue
-            result = subprocess.run(["gc", "--city", city, "session", "logs", marker_json["bead_id"], "--tail", "5", "--json"], capture_output=True, text=True, check=False, timeout=20)
+            bead = subprocess.run(["gc", "--city", city, "--rig", "gascity", "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
+            if bead.returncode: continue
+            bead_json = json.loads(bead.stdout)
+            if isinstance(bead_json, list): bead_json = bead_json[0]
+            session_id = bead_json.get("assignee") if isinstance(bead_json, dict) else None
+            if not isinstance(session_id, str) or not session_id: continue
+            result = subprocess.run(["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"], capture_output=True, text=True, check=False, timeout=20)
             if result.returncode: continue
-            transcript = json.loads(result.stdout)
-            if not isinstance(transcript, dict): continue
+            review = _review_from_peek(json.loads(result.stdout))
+            if review is None: continue
+            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
             exported.append(marker_path.stem)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):

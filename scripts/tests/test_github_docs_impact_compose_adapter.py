@@ -99,6 +99,11 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "gascity/github-docs-impact.docs-impact-reviewer"])
             self.assertEqual(json.loads(marker.read_text()), {"bead_id": "bead-1", "source_key": "github-pr:17:9:" + SHA, "dispatched": True})
 
+    def test_city_peek_export_recovers_only_the_canonical_review_object(self) -> None:
+        rendered = "intro\n• " + json.dumps(review()) + "\n\n› Implement {feature}"
+        self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
+        self.assertIsNone(dispatcher._review_from_peek({"output": "• {not json}"}))
+
 
 if __name__ == "__main__":
     unittest.main()
