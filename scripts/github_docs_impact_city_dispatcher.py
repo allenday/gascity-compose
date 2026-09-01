@@ -52,6 +52,72 @@ def _reviewer_target() -> tuple[str, str]:
     return rig, target
 
 
+def _source_scope(source_key: str) -> tuple[str, str, str] | None:
+    """Return the immutable PR lineage portion of a GitHub source key."""
+    parts = source_key.split(":")
+    if len(parts) != 4 or parts[0] != "github-pr" or not all(parts):
+        return None
+    return tuple(parts[:3])
+
+
+def _latest_sources(review_dir: pathlib.Path) -> dict[tuple[str, str, str], str]:
+    """Pick the last durable request for each PR lineage.
+
+    The webhook persists requests locally in delivery order.  Only the latest
+    SHA can be reviewed; older revisions consume a finite reviewer pool and
+    would otherwise starve the current revision after a force-push storm.
+    """
+    selected: dict[tuple[str, str, str], tuple[int, str, str]] = {}
+    for request_path in sorted((review_dir / "requests").glob("*.json")):
+        try:
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            source_key = request.get("source_key") if isinstance(request, dict) else None
+            scope = _source_scope(source_key) if isinstance(source_key, str) else None
+            if scope is None:
+                continue
+            candidate = (request_path.stat().st_mtime_ns, request_path.stem, source_key)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if scope not in selected or candidate[:2] > selected[scope][:2]:
+            selected[scope] = candidate
+    return {scope: value[2] for scope, value in selected.items()}
+
+
+def retire_superseded() -> list[str]:
+    """Close City Beads for older SHA deliveries before they occupy a worker."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, _ = _reviewer_target()
+    latest = _latest_sources(review_dir)
+    retired: list[str] = []
+    for marker_path in sorted((review_dir / "dispatch").glob("*.json")):
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            source_key = marker.get("source_key") if isinstance(marker, dict) else None
+            scope = _source_scope(source_key) if isinstance(source_key, str) else None
+            bead_id = marker.get("bead_id") if isinstance(marker, dict) else None
+            if marker.get("dispatched") is not True or scope is None or not isinstance(bead_id, str):
+                continue
+            if latest.get(scope) == source_key:
+                continue
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        result = subprocess.run(
+            ["gc", "--city", city, "--rig", rig, "bd", "close", bead_id, "--reason", "Superseded by a newer GitHub pull-request revision", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=45,
+        )
+        if result.returncode:
+            continue
+        _atomic_write(marker_path, json.dumps({**marker, "dispatched": "retired"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        retired.append(marker_path.stem)
+    return retired
+
+
 def dispatch_pending() -> list[str]:
     """Sling each pending request once, and acknowledge only on success."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
@@ -209,7 +275,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"created": create_pending(), "dispatched": dispatch_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

@@ -111,6 +111,25 @@ class CandidateBridgeTests(unittest.TestCase):
                 self.assertEqual(dispatcher.create_pending(), [request.stem])
             self.assertEqual(command.call_args.args[0][:6], ["gc", "--city", "/city", "--rig", "my-project", "bd"])
 
+    def test_city_dispatcher_retires_superseded_pr_work_before_dispatching_new_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            older, newer = "d" * 64, "e" * 64
+            source_prefix = "github-pr:17:9:"
+            for digest, sha in ((older, "a" * 40), (newer, "b" * 40)):
+                request = root / "requests" / f"{digest}.json"
+                request.parent.mkdir(exist_ok=True)
+                request.write_text(json.dumps({"source_key": source_prefix + sha, "description": "review", "metadata": "{}"}))
+            marker = root / "dispatch" / f"{older}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-old", "source_key": source_prefix + "a" * 40, "dispatched": True}))
+            result = mock.Mock(returncode=0, stdout="{}", stderr="")
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=result) as command:
+                self.assertEqual(dispatcher.retire_superseded(), [older])
+            self.assertEqual(command.call_args.args[0], ["gc", "--city", "/city", "--rig", "my-project", "bd", "close", "mp-old", "--reason", "Superseded by a newer GitHub pull-request revision", "--json"])
+            self.assertEqual(json.loads(marker.read_text())["dispatched"], "retired")
+
     def test_city_peek_export_recovers_only_the_canonical_review_object(self) -> None:
         rendered = "intro\n• " + json.dumps(review()) + "\n\n› Implement {feature}"
         self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
