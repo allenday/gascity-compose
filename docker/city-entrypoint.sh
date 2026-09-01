@@ -15,6 +15,9 @@ for template in /run/secrets/codex-config/*.toml.template; do
   envsubst '$TAILNET_OLLAMA_BASE_URL $RUNPOD_OPENAI_BASE_URL $GEMMA_MODEL' \
     < "$template" > "$output"
 done
+# City sessions are non-interactive; an upgrade prompt would otherwise block a
+# reviewer before it can consume its assigned Bead.
+printf '%s\n' 'check_for_update_on_startup = false' >> "${CODEX_HOME:-/run/codex}/config.toml"
 chmod 0600 "${CODEX_HOME:-/run/codex}"/*.toml
 cat > "$GC_HOME/cities.toml" <<EOF
 [[cities]]
