@@ -474,7 +474,12 @@ def candidates(now: float) -> list[dict[str, Any]]:
                 # blocking decision has become a durable City journey.  The
                 # later worker-result bridge owns candidate acceptance and the
                 # check's terminal transition.
-                result.append({"journey": _admit_docs_journey(candidate), "accepted": False, "reason": "docs journey dispatched"})
+                journey = _admit_docs_journey(candidate)
+                # The generic runtime owns the visible Check's durable
+                # ``journey-pending`` transition. Admission is deliberately
+                # first: a crash cannot leave a pending Check with no journey.
+                accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
+                result.append({"journey": journey, "review": accepted})
             else:
                 result.append(runtime.accept_candidate(store, candidate, adapter, now=now))
         except (OSError, ValueError, json.JSONDecodeError) as exc:

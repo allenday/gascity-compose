@@ -19,6 +19,15 @@ import tempfile
 import time
 
 
+PACK_SCRIPTS = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+if PACK_SCRIPTS not in sys.path:
+    sys.path.insert(0, PACK_SCRIPTS)
+
+import github_intake_common as common
+import github_intake_docs_impact as impact
+import github_intake_docs_review_runtime as review_runtime
+
+
 def _atomic_write(path: pathlib.Path, payload: bytes) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
@@ -225,6 +234,62 @@ def _matches_admitted_child(expected: dict[str, object], update: dict[str, objec
     return all(admitted.get(field) == expected.get(field) for field in fields)
 
 
+def _original_check_outcome(journey: dict[str, object]) -> str:
+    """Return whether a settled journey can terminalize its originating Check.
+
+    A docs-followup PR is evidence of work prepared, not evidence that the
+    contributor's PR is documented. Its merge produces a new source SHA and a
+    new normal docs-impact review, which alone may pass the required Check.
+    """
+    state = journey.get("state")
+    if state != "baseline-complete":
+        return "action_required" if state in {
+            "owner-review-required", "blocked-on-product-decision", "budget-exhausted", "cancelled",
+        } else "pending"
+    actions = journey.get("actions")
+    docs_pr = any(
+        isinstance(action, dict) and action.get("kind") == "create_docs_pr" and action.get("state") == "completed"
+        for action in actions
+    ) if isinstance(actions, list) else False
+    return "pending" if docs_pr else "action_required"
+
+
+def _terminalize_original_check(marker: dict[str, object], journey: dict[str, object]) -> bool:
+    """Persist and project only a genuine journey failure to the source Check."""
+    if _original_check_outcome(journey) != "action_required":
+        return False
+    admitted = marker.get("admitted_child")
+    source_key = admitted.get("source_key") if isinstance(admitted, dict) else None
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    if not isinstance(source_key, str) or not source_key or not review_dir:
+        raise ValueError("journey marker lacks original review source")
+    config = common.load_effective_config()
+    app = config.get("app") if isinstance(config, dict) else None
+    installation_id = os.environ.get("GITHUB_INSTALLATION_ID", "") or (app or {}).get("installation_id", "")
+    if not isinstance(app, dict) or not str(installation_id).strip():
+        raise ValueError("GitHub App configuration is unavailable for journey terminal status")
+    store = review_runtime.FileDocsReviewStore(review_dir)
+    with store.lock(source_key):
+        record = store.load(source_key)
+        if record is None:
+            raise ValueError("journey source review run was not found")
+        if record.get("state") == "terminal" and record.get("conclusion") == "action_required":
+            return True
+        if record.get("state") != "journey-pending":
+            return False
+        record["state"] = "terminal"
+        record["conclusion"] = "action_required"
+        record["pending_actions"] = ["ensure_terminal_check"]
+        record["journey"] = {"identity": marker.get("journey_identity"), "state": journey.get("state")}
+        store.save(record)
+        gateway = impact.GitHubAppProjectionGateway(app, str(installation_id))
+        projection = impact.AppProjection(store, gateway)
+        projection.perform("ensure_terminal_check", record)
+        record["pending_actions"] = []
+        store.save(record)
+    return True
+
+
 def _journey_update_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
     """Recover one final worker update without trusting surrounding prose."""
     output = peek.get("output")
@@ -316,6 +381,11 @@ def harvest_journey_updates() -> list[str]:
             )
             if projected.returncode:
                 continue
+            projected_result = json.loads(projected.stdout)
+            projected_journey = projected_result.get("journey") if isinstance(projected_result, dict) else None
+            if not isinstance(projected_journey, dict):
+                continue
+            _terminalize_original_check(marker, projected_journey)
             _atomic_write(marker_path, json.dumps({**marker, "dispatched": "recorded"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
             harvested.append(marker_path.stem)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):

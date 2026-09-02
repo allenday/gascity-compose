@@ -231,7 +231,7 @@ class CandidateBridgeTests(unittest.TestCase):
                 mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed"}]), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(update)}), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"children": [{"key": "child-1", "state": "complete"}]}}), stderr=""),
-                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete", "actions": [{"kind": "create_docs_pr", "state": "completed"}]}}), stderr=""),
             ]
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_JOURNEY_TARGET": "my-project/github-docs-impact.docs-journey", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
@@ -246,6 +246,11 @@ class CandidateBridgeTests(unittest.TestCase):
         update = {"admitted_child": {**child, "decision_digest": "other"}}
 
         self.assertFalse(dispatcher._matches_admitted_child(child, update))
+
+    def test_followup_pr_keeps_originating_check_pending_until_current_sha_is_reviewed(self) -> None:
+        self.assertEqual(dispatcher._original_check_outcome({"state": "baseline-complete", "actions": [{"kind": "create_docs_pr", "state": "completed"}]}), "pending")
+        self.assertEqual(dispatcher._original_check_outcome({"state": "baseline-complete", "actions": []}), "action_required")
+        self.assertEqual(dispatcher._original_check_outcome({"state": "budget-exhausted", "actions": []}), "action_required")
 
     def test_city_dispatcher_creates_review_work_in_the_target_rig(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
