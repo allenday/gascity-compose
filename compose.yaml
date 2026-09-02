@@ -191,6 +191,9 @@ services:
       GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
+      # Docs-journey workers read the already-imported App configuration through
+      # the pack helper; credentials never enter their ambient environment.
+      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
@@ -205,6 +208,7 @@ services:
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
       - ./state/github-intake/docs-review:/var/lib/github-docs-impact/review
+      - ./state/github-intake:/var/lib/github-intake:ro
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,
