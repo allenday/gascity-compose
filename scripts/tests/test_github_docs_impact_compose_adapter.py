@@ -212,12 +212,40 @@ class CandidateBridgeTests(unittest.TestCase):
             root = pathlib.Path(temp)
             marker = root / "journey-dispatch" / ("d" * 64 + ".json")
             marker.parent.mkdir()
-            marker.write_text(json.dumps({"bead_id": "bead-journey", "child_key": "child-1", "journey_identity": "github-docs-journey:17:key:" + SHA, "dispatched": False}))
+            marker.write_text(json.dumps({"bead_id": "bead-journey", "child_key": "child-1", "journey_identity": "github-docs-journey:17:key:" + SHA, "admitted_child": {}, "dispatched": False}))
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_JOURNEY_TARGET": "my-project/github-docs-impact.docs-journey"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="{}", stderr="")) as command:
                 self.assertEqual(dispatcher.dispatch_journey_pending(), [marker.stem])
             self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-journey"])
             self.assertTrue(json.loads(marker.read_text())["dispatched"])
+
+    def test_city_dispatcher_records_one_completed_journey_worker_update(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            marker = root / "journey-dispatch" / ("d" * 64 + ".json")
+            marker.parent.mkdir()
+            admitted = {"journey_identity": "github-docs-journey:17:key:" + SHA, "snapshot_sha": SHA, "decision_identity": {"source_key": "github-pr:17:9:" + SHA}, "decision_digest": "digest", "source_key": "github-pr:17:9:" + SHA, "source_url": "https://github.com/example/docs/pull/9", "documentation_entry_point": "README.md", "parent_issue_url": "https://github.com/example/docs/pull/9", "evidence_paths": ["docs/guide.md"]}
+            marker.write_text(json.dumps({"bead_id": "bead-journey", "child_key": "child-1", "journey_identity": "github-docs-journey:17:key:" + SHA, "admitted_child": admitted, "dispatched": True}))
+            update = {"schema_version": 1, "kind": "github-docs-journey-child-update", "admitted_child": admitted, "state": "complete"}
+            commands = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(update)}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"children": [{"key": "child-1", "state": "complete"}]}}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_JOURNEY_TARGET": "my-project/github-docs-impact.docs-journey", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
+                self.assertEqual(dispatcher.harvest_journey_updates(), [marker.stem])
+            self.assertEqual(command.call_count, 4)
+            self.assertIn("record-child-update", command.call_args_list[2].args[0])
+            self.assertIn("project-until-settled", command.call_args_list[3].args[0])
+            self.assertEqual(json.loads(marker.read_text())["dispatched"], "recorded")
+
+    def test_journey_worker_update_must_echo_its_admitted_child(self) -> None:
+        child = {"journey_identity": "journey", "snapshot_sha": SHA, "decision_identity": {"source_key": "source"}, "decision_digest": "digest", "source_key": "source", "source_url": "url", "documentation_entry_point": "README.md", "parent_issue_url": "url", "evidence_paths": ["docs/guide.md"]}
+        update = {"admitted_child": {**child, "decision_digest": "other"}}
+
+        self.assertFalse(dispatcher._matches_admitted_child(child, update))
 
     def test_city_dispatcher_creates_review_work_in_the_target_rig(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

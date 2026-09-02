@@ -14,6 +14,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -150,7 +151,7 @@ def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         return None
-    required = {"bead_id", "child_key", "journey_identity", "dispatched"}
+    required = {"bead_id", "child_key", "journey_identity", "admitted_child", "dispatched"}
     if not isinstance(value, dict) or set(value) != required or value.get("dispatched") is not False:
         return None
     result = {key: value.get(key) for key in ("bead_id", "child_key", "journey_identity")}
@@ -158,7 +159,9 @@ def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
         return None
     if not result["journey_identity"].startswith("github-docs-journey:"):
         return None
-    return result  # type: ignore[return-value]
+    if not isinstance(value.get("admitted_child"), dict):
+        return None
+    return {**result, "admitted_child": value["admitted_child"]}  # type: ignore[return-value]
 
 
 def _journey_target() -> str:
@@ -193,6 +196,131 @@ def dispatch_journey_pending() -> list[str]:
         _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         dispatched.append(marker_path.stem)
     return dispatched
+
+
+def _completed_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {"bead_id", "child_key", "journey_identity", "admitted_child", "dispatched"}
+    if not isinstance(value, dict) or set(value) != required or value.get("dispatched") is not True:
+        return None
+    result = {key: value.get(key) for key in ("bead_id", "child_key", "journey_identity")}
+    if not all(isinstance(item, str) and item for item in result.values()):
+        return None
+    if not isinstance(value.get("admitted_child"), dict):
+        return None
+    return {**result, "admitted_child": value["admitted_child"]}  # type: ignore[return-value]
+
+
+def _matches_admitted_child(expected: dict[str, object], update: dict[str, object]) -> bool:
+    admitted = update.get("admitted_child")
+    if not isinstance(admitted, dict):
+        return False
+    fields = (
+        "journey_identity", "snapshot_sha", "decision_identity", "decision_digest",
+        "source_key", "source_url", "documentation_entry_point", "parent_issue_url", "evidence_paths",
+    )
+    return all(admitted.get(field) == expected.get(field) for field in fields)
+
+
+def _journey_update_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
+    """Recover one final worker update without trusting surrounding prose."""
+    output = peek.get("output")
+    if not isinstance(output, str):
+        return None
+    compact = "".join(line.strip() for line in output.splitlines())
+    decoder = json.JSONDecoder()
+    update: dict[str, object] | None = None
+    for index, char in enumerate(compact):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(compact[index:])
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(value, dict)
+                and value.get("schema_version") == 1
+                and value.get("kind") == "github-docs-journey-child-update"
+                and value.get("state") in {"complete", "blocked", "failed", "cancelled"}
+                and isinstance(value.get("admitted_child"), dict)):
+            update = value
+    return update
+
+
+def harvest_journey_updates() -> list[str]:
+    """Record exactly one closed worker result, then re-project its intents.
+
+    The controller remains the only authority that may create the follow-up
+    PR.  This adapter merely moves its final worker evidence across the
+    durable command boundary; it does not touch the original docs-impact
+    Check.
+    """
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    target = _journey_target()
+    rig = target.partition("/")[0]
+    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+    command_script = f"{pack_scripts}/github_intake_docs_journey_commands.py"
+    store = str(review_dir / "journeys")
+    harvested: list[str] = []
+    for marker_path in sorted((review_dir / "journey-dispatch").glob("*.json")):
+        marker = _completed_journey_marker(marker_path)
+        if marker is None:
+            continue
+        try:
+            bead = subprocess.run(
+                ["gc", "--city", city, "--rig", rig, "bd", "show", marker["bead_id"], "--json"],
+                capture_output=True, text=True, check=False, timeout=20,
+            )
+            if bead.returncode:
+                continue
+            bead_json = json.loads(bead.stdout)
+            if isinstance(bead_json, list):
+                bead_json = bead_json[0]
+            if not isinstance(bead_json, dict) or bead_json.get("status") != "closed":
+                continue
+            session_id = bead_json.get("assignee")
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            peek = subprocess.run(
+                ["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"],
+                capture_output=True, text=True, check=False, timeout=20,
+            )
+            if peek.returncode:
+                continue
+            update = _journey_update_from_peek(json.loads(peek.stdout))
+            if update is None or not _matches_admitted_child(marker["admitted_child"], update):
+                continue
+            record = subprocess.run(
+                [sys.executable, command_script, "record-child-update", "--once", "--store", store,
+                 "--input", json.dumps({"identity": marker["journey_identity"], "update": update}, sort_keys=True, separators=(",", ":"))],
+                capture_output=True, text=True, check=False, timeout=60,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if record.returncode:
+                continue
+            recorded = json.loads(record.stdout)
+            journey = recorded.get("journey") if isinstance(recorded, dict) else None
+            child = next((item for item in journey.get("children", []) if isinstance(item, dict) and item.get("key") == marker["child_key"]), None) if isinstance(journey, dict) else None
+            if not isinstance(child, dict) or child.get("state") == "admitted":
+                continue
+            projected = subprocess.run(
+                [sys.executable, command_script, "project-until-settled", "--once", "--store", store,
+                 "--identity", marker["journey_identity"]],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if projected.returncode:
+                continue
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "recorded"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            harvested.append(marker_path.stem)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return harvested
 
 
 def create_pending() -> list[str]:
@@ -345,7 +473,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "journeys": dispatch_journey_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "journeys": dispatch_journey_pending(), "journey_updates": harvest_journey_updates(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

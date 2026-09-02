@@ -325,7 +325,7 @@ def _admit_docs_journey(candidate: dict[str, Any]) -> dict[str, Any]:
     bead_id = ((bead_action or {}).get("resource") or {}).get("id") if isinstance(bead_action, dict) else None
     if not isinstance(child, dict) or not isinstance(bead_id, str) or not bead_id:
         raise ValueError("docs journey did not persist dispatchable child evidence")
-    marker = {"bead_id": bead_id, "child_key": ready[0], "journey_identity": journey_identity, "dispatched": False}
+    marker = {"bead_id": bead_id, "child_key": ready[0], "journey_identity": journey_identity, "admitted_child": child, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
 
