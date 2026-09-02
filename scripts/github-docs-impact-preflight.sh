@@ -43,7 +43,7 @@ case "$pack_dir" in
   *) fail "GITHUB_PACK_DIR must be an absolute path" ;;
 esac
 [ -d "$pack_dir" ] || fail "GITHUB_PACK_DIR does not exist: $pack_dir"
-for required in github/scripts/github_intake_docs_review_runtime.py github/scripts/github_intake_docs_impact.py github/agents/docs-impact-reviewer/prompt.template.md; do
+for required in github/scripts/github_intake_docs_review_runtime.py github/scripts/github_intake_docs_impact.py github/scripts/github_intake_docs_journey_commands.py github/agents/docs-impact-reviewer/prompt.template.md github/agents/docs-journey/prompt.template.md; do
   [ -f "$pack_dir/$required" ] || fail "GITHUB_PACK_DIR lacks $required"
 done
 

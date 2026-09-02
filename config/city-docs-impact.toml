@@ -21,3 +21,9 @@ rig = "*"
 name = "github-docs-impact.docs-impact-reviewer"
 provider = "codex-docs-impact"
 work_dir = ".gc/agents/{{.AgentBase}}"
+
+[[patches.agent]]
+rig = "*"
+name = "github-docs-impact.docs-journey"
+provider = "codex-docs-impact"
+work_dir = ".gc/agents/{{.AgentBase}}"

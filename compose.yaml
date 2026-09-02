@@ -109,6 +109,7 @@ services:
       BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
       GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
+      GC_CITY_DOCS_JOURNEY_TARGET: ${GC_CITY_DOCS_JOURNEY_TARGET:?Set GC_CITY_DOCS_JOURNEY_TARGET in .env to the journey worker qualified name}
       GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
       GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
       GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
@@ -189,6 +190,7 @@ services:
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
+      GC_CITY_DOCS_JOURNEY_TARGET: ${GC_CITY_DOCS_JOURNEY_TARGET:?Set GC_CITY_DOCS_JOURNEY_TARGET in .env to the journey worker qualified name}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       # Docs-journey workers read the already-imported App configuration through

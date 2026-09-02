@@ -28,6 +28,7 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 # inputs, so interpolation failures are caught before GitHub Actions runs.
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
+require 'GC_CITY_DOCS_JOURNEY_TARGET: my-project/github-docs-impact\.docs-journey' "$ci_workflow"
 require 'city:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
@@ -86,6 +87,7 @@ forbid_runtime() {
 require_runtime 'github_docs_impact_compose_adapter.py.*reconcile.*--loop'
 require_runtime 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_runtime 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_runtime 'GC_CITY_DOCS_JOURNEY_TARGET:.*GC_CITY_DOCS_JOURNEY_TARGET'
 require_runtime 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
 require_runtime 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
@@ -116,6 +118,7 @@ forbid_city() {
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
+require_city 'GC_CITY_DOCS_JOURNEY_TARGET:.*GC_CITY_DOCS_JOURNEY_TARGET'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 # City runs as HOST_UID:GID, so its supervisor state and real home must not
@@ -143,6 +146,7 @@ require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
 require 'city-docs-impact.toml' "$root/docker/city-entrypoint.sh"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-docs-impact.toml"
 require '^name = "github-docs-impact\.docs-impact-reviewer"$' "$root/config/city-docs-impact.toml"
+require '^name = "github-docs-impact\.docs-journey"$' "$root/config/city-docs-impact.toml"
 require '^work_dir = "\.gc/agents/\{\{\.AgentBase\}\}"$' "$root/config/city-docs-impact.toml"
 require 'gpt-5\.6-terra' "$root/config/city-docs-impact.toml"
 require 'model_reasoning_effort=medium' "$root/config/city-docs-impact.toml"

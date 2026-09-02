@@ -144,6 +144,57 @@ def dispatch_pending() -> list[str]:
     return dispatched
 
 
+def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
+    """Validate one controller-projected journey child dispatch request."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {"bead_id", "child_key", "journey_identity", "dispatched"}
+    if not isinstance(value, dict) or set(value) != required or value.get("dispatched") is not False:
+        return None
+    result = {key: value.get(key) for key in ("bead_id", "child_key", "journey_identity")}
+    if not all(isinstance(item, str) and item for item in result.values()):
+        return None
+    if not result["journey_identity"].startswith("github-docs-journey:"):
+        return None
+    return result  # type: ignore[return-value]
+
+
+def _journey_target() -> str:
+    target = os.environ.get("GC_CITY_DOCS_JOURNEY_TARGET", "").strip()
+    rig, separator, agent = target.partition("/")
+    if not rig or not separator or not agent:
+        raise ValueError("GC_CITY_DOCS_JOURNEY_TARGET must be a qualified <rig>/<agent> name")
+    return target
+
+
+def dispatch_journey_pending() -> list[str]:
+    """Sling only children already projected by the durable journey controller."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    target = _journey_target()
+    dispatched: list[str] = []
+    for marker_path in sorted((review_dir / "journey-dispatch").glob("*.json")):
+        marker = _pending_journey_marker(marker_path)
+        if marker is None:
+            continue
+        result = subprocess.run(
+            ["gc", "--city", city, "sling", target, marker["bead_id"], "--force", "--no-convoy", "--no-formula", "--nudge", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=45,
+        )
+        if result.returncode:
+            continue
+        _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        dispatched.append(marker_path.stem)
+    return dispatched
+
+
 def create_pending() -> list[str]:
     """Create reviewer Beads through City's managed store, never a sidecar."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
@@ -294,7 +345,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "journeys": dispatch_journey_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:
