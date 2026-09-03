@@ -482,6 +482,49 @@ def _write_invalid_final(path: pathlib.Path, *, replace_stale: bool) -> None:
     _atomic_write(path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
 
 
+def _completion_path(review_dir: pathlib.Path, marker_path: pathlib.Path) -> pathlib.Path:
+    return review_dir / "completions" / marker_path.name
+
+
+def _transcript_session_id(path: pathlib.Path) -> str | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    session_id = value.get("session_id") if isinstance(value, dict) else None
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _close_persisted_review(review_dir: pathlib.Path, marker_path: pathlib.Path, marker: dict[str, object], session_id: str, city: str, rig: str) -> None:
+    """Close only the session that produced an already-durable review.
+
+    The intent is written before the guarded status transition, so a restart
+    retries transport failures.  The Beads update guards make a reaper's new
+    assignee a harmless lost race rather than a task we close by mistake.
+    """
+    path = _completion_path(review_dir, marker_path)
+    expected = {"bead_id": marker["bead_id"], "source_key": marker["source_key"], "session_id": session_id, "state": "close-pending"}
+    if path.exists():
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or any(value.get(key) != expected[key] for key in ("bead_id", "source_key", "session_id")):
+            raise ValueError("invalid review completion marker")
+        if value.get("state") in {"closed", "ownership-changed"}:
+            return
+    else:
+        _atomic_write(path, json.dumps(expected, sort_keys=True, separators=(",", ":")).encode())
+    closed = subprocess.run(
+        ["gc", "--city", city, "--rig", rig, "bd", "update", str(marker["bead_id"]), "--status", "closed", "--if-assignee", session_id, "--if-status", "in_progress", "--session", session_id, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    if closed.returncode == 0:
+        _atomic_write(path, json.dumps({**expected, "state": "closed"}, sort_keys=True, separators=(",", ":")).encode())
+    elif closed.returncode == 13:
+        _atomic_write(path, json.dumps({**expected, "state": "ownership-changed"}, sort_keys=True, separators=(",", ":")).encode())
+
+
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
@@ -498,6 +541,16 @@ def export_transcripts() -> list[str]:
             replace_stale = False
             if transcript_path.exists():
                 if _stored_transcript_matches_source(transcript_path, marker_json["source_key"]):
+                    completion = _completion_path(review_dir, marker_path)
+                    if completion.exists():
+                        value = json.loads(completion.read_text(encoding="utf-8"))
+                        session_id = value.get("session_id") if isinstance(value, dict) else None
+                        if isinstance(session_id, str) and session_id:
+                            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
+                    else:
+                        session_id = _transcript_session_id(transcript_path)
+                        if session_id is not None:
+                            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
                     continue
                 replace_stale = True
             bead = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
@@ -526,10 +579,11 @@ def export_transcripts() -> list[str]:
                     _write_invalid_final(transcript_path, replace_stale=replace_stale)
                     exported.append(marker_path.stem)
                 continue
-            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
+            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}], "session_id": session_id}
             if replace_stale:
                 _quarantine_stale_transcript(transcript_path)
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
             exported.append(marker_path.stem)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue

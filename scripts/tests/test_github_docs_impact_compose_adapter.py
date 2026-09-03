@@ -288,6 +288,85 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
         self.assertIsNone(dispatcher._review_from_peek({"output": "• {not json}"}))
 
+    def test_city_export_closes_an_open_reviewer_bead_after_persisting_valid_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            result = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "in_progress"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(review())}), stderr=""),
+                mock.Mock(returncode=0, stdout="{}", stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result) as command:
+                self.assertEqual(dispatcher.export_transcripts(), [digest])
+            self.assertEqual(
+                command.call_args_list[2].args[0],
+                ["gc", "--city", "/city", "--rig", "my-project", "bd", "update", "mp-1", "--status", "closed", "--if-assignee", "mc-1", "--if-status", "in_progress", "--session", "mc-1", "--json"],
+            )
+
+    def test_city_export_retries_a_durable_close_intent_after_a_transport_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            result = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "in_progress"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(review())}), stderr=""),
+                mock.Mock(returncode=1, stdout="", stderr="temporarily unavailable"),
+                mock.Mock(returncode=0, stdout="{}", stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result) as command:
+                self.assertEqual(dispatcher.export_transcripts(), [digest])
+                self.assertEqual(dispatcher.export_transcripts(), [])
+            self.assertEqual(command.call_count, 4)
+            self.assertEqual(json.loads((root / "completions" / f"{digest}.json").read_text())["state"], "closed")
+
+    def test_city_export_recovers_close_intent_from_a_persisted_transcript_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            transcript = root / "transcripts" / f"{digest}.json"
+            transcript.parent.mkdir()
+            transcript.write_text(json.dumps({"entries": [{"role": "assistant", "text": json.dumps(review())}], "session_id": "mc-1"}))
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="{}", stderr="")) as command:
+                self.assertEqual(dispatcher.export_transcripts(), [])
+            self.assertEqual(command.call_args.args[0][6:12], ["update", "mp-1", "--status", "closed", "--if-assignee", "mc-1"])
+            self.assertEqual(json.loads((root / "completions" / f"{digest}.json").read_text())["state"], "closed")
+
+    def test_city_export_does_not_close_a_reaper_reassigned_reviewer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            digest = "d" * 64
+            source_key = f"github-pr:17:9:{SHA}"
+            marker = root / "dispatch" / f"{digest}.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps({"bead_id": "mp-1", "source_key": source_key, "dispatched": True}))
+            result = [
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "in_progress"}]), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(review())}), stderr=""),
+                mock.Mock(returncode=13, stdout="", stderr="assignee guard failed"),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result) as command:
+                self.assertEqual(dispatcher.export_transcripts(), [digest])
+                self.assertEqual(dispatcher.export_transcripts(), [])
+            self.assertEqual(command.call_count, 3)
+            self.assertEqual(json.loads((root / "completions" / f"{digest}.json").read_text())["state"], "ownership-changed")
+
     def test_city_export_marks_closed_non_json_output_as_invalid_final(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -343,6 +422,7 @@ class CandidateBridgeTests(unittest.TestCase):
             result = [
                 mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1"}]), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(review())}), stderr=""),
+                mock.Mock(returncode=0, stdout="{}", stderr=""),
             ]
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=result):
