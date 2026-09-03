@@ -18,6 +18,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 import time
 from typing import Any
 
@@ -276,7 +277,7 @@ def _journey_marker_path(candidate: dict[str, Any]) -> pathlib.Path:
     return _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journey-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
 
 
-def _admit_docs_journey(candidate: dict[str, Any]) -> dict[str, Any]:
+def _admit_docs_journey(candidate: dict[str, Any], on_admitted: Callable[[], None] | None = None) -> dict[str, Any]:
     """Persist and project a blocking journey, then request one City sling.
 
     This deliberately stops at dispatch.  Worker-result harvesting and
@@ -312,6 +313,8 @@ def _admit_docs_journey(candidate: dict[str, Any]) -> dict[str, Any]:
     journey_identity = journey.get("identity") if isinstance(journey, dict) else None
     if not isinstance(journey_identity, str) or not journey_identity:
         raise ValueError("docs journey admission returned no identity")
+    if on_admitted is not None:
+        on_admitted()
     projected = subprocess.run(command[:2] + ["project-until-settled", "--once", "--store", command[5], "--identity", journey_identity], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     if projected.returncode:
         raise ValueError(projected.stderr.strip() or "docs journey projection failed")
@@ -483,11 +486,14 @@ def candidates(now: float) -> list[dict[str, Any]]:
                 # blocking decision has become a durable City journey.  The
                 # later worker-result bridge owns candidate acceptance and the
                 # check's terminal transition.
-                journey = _admit_docs_journey(candidate)
+                accepted: dict[str, Any] | None = None
+                def mark_journey_pending() -> None:
+                    nonlocal accepted
+                    accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
+                journey = _admit_docs_journey(candidate, mark_journey_pending)
                 # The generic runtime owns the visible Check's durable
                 # ``journey-pending`` transition. Admission is deliberately
                 # first: a crash cannot leave a pending Check with no journey.
-                accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
                 result.append({"journey": journey, "review": accepted})
             else:
                 result.append(runtime.accept_candidate(store, candidate, adapter, now=now))
