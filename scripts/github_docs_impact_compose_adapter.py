@@ -469,6 +469,15 @@ def candidates(now: float) -> list[dict[str, Any]]:
         try:
             candidate = json.loads(path.read_text(encoding="utf-8"))
             artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
+            identity = artifact.get("identity") if isinstance(artifact, dict) else None
+            source_key = identity.get("source_key") if isinstance(identity, dict) else None
+            review_run = store.load(source_key) if isinstance(source_key, str) and source_key else None
+            if not isinstance(review_run, dict) or review_run.get("state") not in {"dispatched", "journey-pending"}:
+                # Candidate artifacts are retained as immutable evidence.  A
+                # stale or terminal run must not be re-admitted on every poll
+                # and block later revisions behind an obsolete journey.
+                result.append({"accepted": False, "reason": "stale review run"})
+                continue
             if isinstance(artifact, dict) and artifact.get("verdict") == "docs-change-required":
                 # Do not terminalize the visible Check before the exact
                 # blocking decision has become a durable City journey.  The

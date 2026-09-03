@@ -77,6 +77,19 @@ def review() -> dict[str, object]:
 
 
 class CandidateBridgeTests(unittest.TestCase):
+    def test_stale_blocking_candidate_is_ignored_before_journey_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
+            (root / "candidates").mkdir()
+            (root / "candidates" / "candidate.json").write_text(json.dumps(candidate))
+            store = mock.Mock()
+            store.load.return_value = {"state": "stale"}
+            environment = {"GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates"), "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs")}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter, "ComposeAdapter"), mock.patch.object(adapter, "_gateway"), mock.patch.object(adapter, "_admit_docs_journey") as admit:
+                self.assertEqual(adapter.candidates(100), [{"accepted": False, "reason": "stale review run"}])
+            admit.assert_not_called()
+
     def test_docs_change_candidate_becomes_a_source_bound_journey_request(self) -> None:
         candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
 
