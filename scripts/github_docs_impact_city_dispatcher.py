@@ -314,6 +314,17 @@ def _journey_update_from_peek(peek: dict[str, object]) -> dict[str, object] | No
     return update
 
 
+def _journey_update_from_bead(bead: dict[str, object]) -> dict[str, object] | None:
+    """Read the worker's durable terminal update, never a dead session."""
+    metadata = bead.get("metadata")
+    value = metadata.get("docs-journey.result") if isinstance(metadata, dict) else None
+    try:
+        update = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return None
+    return update if isinstance(update, dict) and update.get("kind") == "github-docs-journey-child-update" else None
+
+
 def harvest_journey_updates() -> list[str]:
     """Record exactly one closed worker result, then re-project its intents.
 
@@ -348,16 +359,7 @@ def harvest_journey_updates() -> list[str]:
                 bead_json = bead_json[0]
             if not isinstance(bead_json, dict) or bead_json.get("status") != "closed":
                 continue
-            session_id = bead_json.get("assignee")
-            if not isinstance(session_id, str) or not session_id:
-                continue
-            peek = subprocess.run(
-                ["gc", "--city", city, "session", "peek", session_id, "--lines", "400", "--json"],
-                capture_output=True, text=True, check=False, timeout=20,
-            )
-            if peek.returncode:
-                continue
-            update = _journey_update_from_peek(json.loads(peek.stdout))
+            update = _journey_update_from_bead(bead_json)
             if update is None or not _matches_admitted_child(marker["admitted_child"], update):
                 continue
             record = subprocess.run(
