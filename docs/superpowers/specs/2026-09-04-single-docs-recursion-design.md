@@ -16,20 +16,19 @@ issues.
 flowchart TD
   IN[Incoming context<br/>PR revision, issue, or operator request] --> SNAP[Persist immutable context<br/>and declared coverage collection]
   SNAP --> ASSESS[City assesses each affected<br/>persona-goal-doc-type cell]
-  ASSESS --> DECIDE{Cell result}
+  ASSESS --> CLASSIFY{Coverage evidence}
 
-  DECIDE -->|sufficient| PASS[Project passing GitHub check<br/>or terminal report]
-  DECIDE -->|human judgment required| REVIEW[Project action-required<br/>GitHub check or issue]
-  DECIDE -->|safe active coverage| WORK[Persist bounded City child work]
+  CLASSIFY -->|sufficient| PASS[Project passing GitHub check<br/>or terminal report]
+  CLASSIFY -->|human required| REVIEW[Project human-review outcome<br/>on GitHub]
+  CLASSIFY -->|unmet| DISPOSE{City disposition}
+  DISPOSE -->|active| WORK[Persist bounded City child work]
   WORK --> RESULT[Validate worker result]
   RESULT --> PR[Project one bot-owned<br/>follow-up PR]
-  RESULT --> REVIEW
+  PR -->|merge creates new revision| IN
 
-  DECIDE -->|uncovered cell| BUD[Persist evidence-backed bud]
+  DISPOSE -->|deferred| BUD[Persist evidence-backed bud]
   BUD --> ISSUE[Create or update one idempotent<br/>GitHub issue]
   ISSUE -->|explicit human activation| IN
-
-  PR -->|merge creates new revision| IN
 ```
 
 ## Rules
@@ -37,8 +36,9 @@ flowchart TD
 - Every run has one immutable incoming context and a declared coverage
   collection of persona, goal, and documentation-type cells. The collection
   may contain one cell or the full relevant Diataxis matrix.
-- The City records a result for every affected cell: sufficient, covered by
-  active work, or deferred as a bud.
+- The City first classifies every affected cell as sufficient, unmet, or
+  requiring human judgment. It then records an unmet cell as either active
+  work or a deferred bud.
 - Execution has explicit limits for depth, active child work items, elapsed
   time, and non-progress. Bud creation is not execution and never consumes
   those limits.
@@ -63,12 +63,14 @@ not automatically activate any issue buds.
 ```mermaid
 flowchart LR
   PR[PR revision] --> ASSESS[Assess affected coverage cells]
-  ASSESS -->|sufficient cells| PASS[Pass]
-  ASSESS -->|inconclusive cells| HUMAN[Human review]
-  ASSESS -->|safe docs subset| CHILD[One City child]
+  ASSESS --> CLASSIFY{Coverage evidence}
+  CLASSIFY -->|sufficient| PASS[Pass]
+  CLASSIFY -->|human required| HUMAN[Human review]
+  CLASSIFY -->|unmet| DISPOSE{City disposition}
+  DISPOSE -->|active| CHILD[One City child]
   CHILD --> FOLLOWUP[One follow-up PR]
   FOLLOWUP -->|merged| PR
-  ASSESS -->|uncovered cells| BUDS[Create or update<br/>one issue per cell]
+  DISPOSE -->|deferred| BUDS[Create or update<br/>one issue per cell]
 ```
 
 ## Refactor boundary
