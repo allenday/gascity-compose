@@ -171,7 +171,7 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
     required = {
         "schema_version", "kind", "candidate_digest", "repository_id", "repository", "pr_number",
         "source_key", "snapshot_sha", "source_branch", "candidate_identity", "coverage_cells",
-        "execution_budgets", "direct_child", "bead_id", "dispatched",
+        "execution_budgets", "admission", "direct_child", "bead_id", "dispatched",
     }
     if not isinstance(marker, dict) or set(marker) != required or marker.get("schema_version") != 1:
         return None
@@ -186,7 +186,7 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
     budgets, child = marker.get("execution_budgets"), marker.get("direct_child")
     if not isinstance(budgets, dict) or budgets.get("max_children") != 1 or budgets.get("max_docs_prs") != 1:
         return None
-    if not isinstance(child, dict) or child.get("source_key") != marker["source_key"] or child.get("snapshot_sha") != marker["snapshot_sha"]:
+    if not isinstance(child, dict) or not isinstance(marker.get("admission"), dict):
         return None
     return marker
 
@@ -275,12 +275,12 @@ def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> 
         update = json.loads(value) if isinstance(value, str) else value
     except json.JSONDecodeError:
         return None
-    if not isinstance(update, dict) or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-child-update":
+    if not isinstance(update, dict) or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-direct-child-update":
         return None
     if update.get("admitted_child") != marker.get("direct_child") or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}:
         return None
     branch = update.get("documentation_branch")
-    if branch is not None and (not isinstance(branch, dict) or set(branch) != {"branch", "commit_sha", "evidence"}):
+    if branch is not None and (not isinstance(branch, dict) or set(branch) != {"branch", "commit_sha", "evidence"} or not isinstance(branch.get("branch"), str) or not branch["branch"].startswith("gas-city/") or not isinstance(branch.get("commit_sha"), str) or len(branch["commit_sha"]) != 40 or any(char not in "0123456789abcdef" for char in branch["commit_sha"].lower()) or not isinstance(branch.get("evidence"), list) or not branch["evidence"] or any(not isinstance(item, str) or not item for item in branch["evidence"])):
         return None
     return update
 
@@ -311,12 +311,12 @@ def harvest_direct_child_updates() -> list[str]:
             if update is None:
                 continue
             result_path = review_dir / "direct-child-results" / f"{marker_path.stem}.json"
-            payload = {"direct_child": marker["direct_child"], "result": update}
+            payload = {"admission": marker["admission"], "update": update}
             if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
                 continue
             if not result_path.exists():
                 _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
-            published = subprocess.run([sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            published = subprocess.run([sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(review_dir / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
             if published.returncode:
                 continue
             _atomic_write(marker_path, json.dumps({**marker, "dispatched": "published"}, sort_keys=True, separators=(",", ":")).encode())

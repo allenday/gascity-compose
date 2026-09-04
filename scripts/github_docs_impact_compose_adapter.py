@@ -77,14 +77,13 @@ def _candidate_from_transcript(raw_assignment: bytes, transcript: dict[str, Any]
     artifact = _final_assistant_document(transcript)
     if artifact is None:
         return None
-    envelope = {
-        "schema_version": 1,
-        "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(),
-        "artifact": artifact,
-    }
+    envelope = ({"schema_version": 2, "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(), **artifact}
+                if set(artifact) == {"artifact", "persona_goal_path", "coverage_cells"}
+                else {"schema_version": 1, "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(), "artifact": artifact})
     try:
         import github_intake_docs_patch_worker as worker
-        return worker.validate_final_candidate(raw_assignment, envelope)
+        validator = worker.validate_direct_admission_candidate if envelope["schema_version"] == 2 else worker.validate_final_candidate
+        return validator(raw_assignment, envelope)
     except ValueError:
         return None
 
@@ -239,13 +238,6 @@ def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any])
             or not source_key or not followup_base or not isinstance(coverage_cells, list)
             or not coverage_cells or not all(isinstance(cell, dict) for cell in coverage_cells)):
         raise ValueError("docs-change candidate lacks immutable review identity")
-    budgets = {
-        "max_depth": 1,
-        "max_children": 1,
-        "max_docs_prs": 1,
-        "max_elapsed_seconds": 24 * 60 * 60,
-        "max_non_progress": 3,
-    }
     candidate_digest = hashlib.sha256(_assignment_bytes(candidate)).hexdigest()
     return {
         "schema_version": 1,
@@ -259,16 +251,8 @@ def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any])
         "source_branch": followup_base,
         "candidate_identity": identity,
         "coverage_cells": coverage_cells,
-        "execution_budgets": budgets,
-        "direct_child": {
-            "key": f"github-pr-docs-child:{candidate_digest}",
-            "source_key": source_key,
-            "snapshot_sha": head_sha,
-            "coverage_cells": coverage_cells,
-            "execution_budgets": budgets,
-        },
-        "bead_id": None,
-        "dispatched": False,
+        "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3},
+        "coverage_cells": coverage_cells,
     }
 
 
@@ -292,7 +276,17 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     review_run = review_store.load(source_key)
     if review_run is None or not isinstance(review_run.get("assignment"), dict):
         raise ValueError("docs-change candidate has no durable assignment")
-    marker = _direct_child_request(candidate, review_run["assignment"])
+    request = _direct_child_request(candidate, review_run["assignment"])
+    context = {"repository_id": request["repository_id"], "repository": request["repository"], "pr_number": request["pr_number"], "source_key": request["source_key"], "reviewed_head_sha": request["snapshot_sha"], "source_branch": request["source_branch"], "source_url": f"https://github.com/{request['repository']}/pull/{request['pr_number']}", "installation_id": str(os.environ.get("GITHUB_INSTALLATION_ID", ""))}
+    payload = {"assignment_bytes": __import__("base64").b64encode(_assignment_bytes(review_run["assignment"])).decode(), "candidate": candidate, "context": context}
+    command = [sys.executable, f"{PACK_SCRIPTS}/github_intake_docs_direct_child_admit.py", "--once", "--store", str(_path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))]
+    result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "direct child admission failed")
+    admission = json.loads(result.stdout)
+    if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child"}:
+        raise ValueError("direct child admission returned an invalid record")
+    marker = {**request, "admission": admission, "direct_child": admission["admitted_child"], "bead_id": None, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
 
