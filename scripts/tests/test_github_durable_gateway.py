@@ -352,6 +352,10 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             gateway._run_adapter(job)
 
         self.assertGreater(command.call_args.kwargs["timeout"], 0)
+        self.assertEqual(
+            command.call_args.args[0][-2:],
+            ["--source-key", "github-pr:17:9:" + "a" * 40],
+        )
 
     def test_empty_reconciliation_keeps_dispatch_retryable(self) -> None:
         """Catches a zero-exit polling pass completing City dispatch before it happens."""

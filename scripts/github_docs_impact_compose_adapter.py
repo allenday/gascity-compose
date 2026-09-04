@@ -140,7 +140,7 @@ def _inconclusive_from_invalid_final(raw_assignment: bytes, transcript: dict[str
         return None
 
 
-def _harvest_city_candidates() -> list[str]:
+def _harvest_city_candidates(source_key: str | None = None) -> list[str]:
     """Bridge a completed City transcript into the trusted candidate outbox.
 
     The City only emits its credential-free review decision. This trusted
@@ -159,6 +159,8 @@ def _harvest_city_candidates() -> list[str]:
         try:
             marker = json.loads(marker_path.read_text(encoding="utf-8"))
             if not isinstance(marker, dict) or set(marker) != {"bead_id", "source_key", "dispatched"} or marker.get("dispatched") is not True:
+                continue
+            if source_key is not None and marker.get("source_key") != source_key:
                 continue
             raw_assignment = assignment_path.read_bytes()
             if hashlib.sha256(raw_assignment).hexdigest() != digest:
@@ -468,7 +470,7 @@ def intake(payload: dict[str, Any], token: str, now: float) -> dict[str, Any]:
     return runtime.intake_delivery(store, assignment, ComposeAdapter(store, _gateway(payload)), now=now)
 
 
-def candidates(now: float) -> list[dict[str, Any]]:
+def candidates(now: float, source_key: str | None = None) -> list[dict[str, Any]]:
     store = runtime.FileDocsReviewStore(_path_env("GC_GITHUB_DOCS_REVIEW_RUNS_DIR"))
     adapter = ComposeAdapter(store, _gateway())
     result: list[dict[str, Any]] = []
@@ -477,8 +479,10 @@ def candidates(now: float) -> list[dict[str, Any]]:
             candidate = json.loads(path.read_text(encoding="utf-8"))
             artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
             identity = artifact.get("identity") if isinstance(artifact, dict) else None
-            source_key = identity.get("source_key") if isinstance(identity, dict) else None
-            review_run = store.load(source_key) if isinstance(source_key, str) and source_key else None
+            candidate_source_key = identity.get("source_key") if isinstance(identity, dict) else None
+            if source_key is not None and candidate_source_key != source_key:
+                continue
+            review_run = store.load(candidate_source_key) if isinstance(candidate_source_key, str) and candidate_source_key else None
             if not isinstance(review_run, dict) or review_run.get("state") not in {"dispatched", "journey-pending"}:
                 # Candidate artifacts are retained as immutable evidence.  A
                 # stale or terminal run must not be re-admitted on every poll
@@ -506,11 +510,33 @@ def candidates(now: float) -> list[dict[str, Any]]:
     return result
 
 
-def reconcile(now: float) -> dict[str, Any]:
+class _ScopedDocsReviewStore:
+    """Expose one immutable run to the generic reconciler.
+
+    Gateway lifecycle jobs are source-key scoped.  Letting one job rescan all
+    historical reviews turns a single GitHub API stall into head-of-line
+    blocking for every newer revision.
+    """
+
+    def __init__(self, store: runtime.FileDocsReviewStore, source_key: str) -> None:
+        self._store = store
+        self._source_key = source_key
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        run = self._store.load(self._source_key)
+        return [run] if isinstance(run, dict) else []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
+def reconcile(now: float, source_key: str | None = None) -> dict[str, Any]:
     store = runtime.FileDocsReviewStore(_path_env("GC_GITHUB_DOCS_REVIEW_RUNS_DIR"))
     adapter = ComposeAdapter(store, _gateway())
-    harvested = _harvest_city_candidates()
-    return {"harvested": harvested, "candidates": candidates(now), "runs": runtime.reconcile_pending(store, adapter, now=now)}
+    harvested = _harvest_city_candidates(source_key)
+    accepted = candidates(now, source_key)
+    reconciler_store: Any = _ScopedDocsReviewStore(store, source_key) if source_key else store
+    return {"harvested": harvested, "candidates": accepted, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
 
 
 def main() -> int:
@@ -520,6 +546,7 @@ def main() -> int:
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--payload-file", default=os.environ.get("GC_GITHUB_EVENT_PAYLOAD_FILE", ""))
     parser.add_argument("--token-env", default="GH_TOKEN")
+    parser.add_argument("--source-key", default="")
     args = parser.parse_args()
     if args.once == args.loop:
         parser.error("choose exactly one of --once or --loop")
@@ -533,7 +560,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_GITHUB_DOCS_RECONCILE_SECONDS", "15")))
     while True:
         now = time.time()
-        result = intake(payload, token, now) if args.operation == "intake" else reconcile(now)
+        result = intake(payload, token, now) if args.operation == "intake" else reconcile(now, args.source_key or None)
         print(json.dumps(result, sort_keys=True), flush=True)
         if args.once:
             return 0

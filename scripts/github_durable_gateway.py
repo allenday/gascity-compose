@@ -443,7 +443,7 @@ def _run_adapter(job: Job) -> dict[str, object]:
             payload_path = pathlib.Path(handle.name)
         command.extend(("intake", "--once", "--payload-file", str(payload_path)))
     elif job.kind in {"dispatch", "harvest", "project"}:
-        command.extend(("reconcile", "--once"))
+        command.extend(("reconcile", "--once", "--source-key", _source_key(job.payload)))
     else:
         raise ValueError(f"unknown gateway job kind: {job.kind}")
     try:
