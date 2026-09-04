@@ -59,6 +59,65 @@ def _assignment_bytes(assignment: dict[str, Any]) -> bytes:
     return json.dumps(assignment, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _is_lower_hex_digest(value: Any) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value))
+
+
+def _trusted_direct_patch_context(value: Any) -> dict[str, Any] | None:
+    required = {"schema_version", "kind", "proposal_identity"}
+    if (not isinstance(value, dict) or set(value) != required
+            or value.get("schema_version") != 1
+            or value.get("kind") != "github-docs-recursion-direct-patch-context"
+            or not isinstance(value.get("proposal_identity"), dict)):
+        return None
+    return value
+
+
+def _trusted_direct_admission(value: Any) -> dict[str, Any] | None:
+    """Accept only the exact Pack admission persisted in a handoff receipt."""
+    required = {
+        "schema_version", "kind", "recursion_identity", "admitted_child",
+        "patch_context",
+    }
+    if (not isinstance(value, dict) or set(value) != required
+            or value.get("schema_version") != 1
+            or value.get("kind") != "github-docs-recursion-direct-admission"
+            or not isinstance(value.get("recursion_identity"), str)
+            or not value["recursion_identity"]
+            or not isinstance(value.get("admitted_child"), dict)
+            or _trusted_direct_patch_context(value.get("patch_context")) is None):
+        return None
+    return value
+
+
+def _trusted_direct_result(receipt: Any, digest: str, payload: Any) -> dict[str, Any] | None:
+    """Validate an untrusted City update before invoking credentialed Pack code."""
+    if (not isinstance(payload, dict) or set(payload) != {"handoff_id", "update"}
+            or payload.get("handoff_id") != digest
+            or not isinstance(receipt, dict)
+            or set(receipt) != {"handoff_id", "candidate_digest", "admission", "consumed"}
+            or receipt.get("handoff_id") != digest
+            or not _is_lower_hex_digest(receipt.get("candidate_digest"))
+            or receipt.get("consumed") is not False):
+        return None
+    admission = _trusted_direct_admission(receipt.get("admission"))
+    update = payload.get("update")
+    fields = {
+        "schema_version", "kind", "admitted_child", "state", "patch_context",
+        "documentation_patch",
+    }
+    if (admission is None or not isinstance(update, dict) or set(update) != fields
+            or update.get("schema_version") != 1
+            or update.get("kind") != "github-docs-recursion-direct-child-update"
+            or update.get("admitted_child") != admission["admitted_child"]
+            or update.get("patch_context") != admission["patch_context"]
+            or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}
+            or (update.get("state") == "complete") != (update.get("documentation_patch") is not None)):
+        return None
+    return admission
+
+
 def _final_assistant_document(transcript: dict[str, Any]) -> dict[str, Any] | None:
     """Return only an exact final assistant JSON object, never scraped prose."""
     entries = transcript.get("entries")
@@ -345,7 +404,6 @@ def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any],
         "candidate_identity": identity,
         "coverage_cells": coverage_cells,
         "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3},
-        "coverage_cells": coverage_cells,
     }
 
 
@@ -570,19 +628,18 @@ def publish_direct_child_results() -> list[str]:
     for result_path in sorted(outbox.glob("*.json"))[:256]:
         try:
             digest = result_path.stem
-            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            if not _is_lower_hex_digest(digest):
                 continue
             stat = result_path.lstat()
             if not result_path.is_file() or result_path.is_symlink() or stat.st_size > 262_144:
                 continue
             payload = json.loads(result_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or set(payload) != {"handoff_id", "update"} or payload.get("handoff_id") != digest:
-                continue
             handoff = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-handoffs" / f"{digest}.json"
             if not handoff.is_file() or handoff.is_symlink() or handoff.lstat().st_size > 262_144:
                 continue
             receipt = json.loads(handoff.read_text(encoding="utf-8"))
-            if not isinstance(receipt, dict) or set(receipt) != {"handoff_id", "candidate_digest", "admission", "consumed"} or receipt.get("handoff_id") != digest or receipt.get("consumed") is not False:
+            admission = _trusted_direct_result(receipt, digest, payload)
+            if admission is None:
                 continue
             completion_payload = {"admission": receipt["admission"], "update": payload["update"]}
             receipt_path = receipt_root / f"{digest}.json"

@@ -376,6 +376,53 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertIn("project-until-settled", command.call_args_list[1].args[0])
             self.assertTrue((root / "direct-result-receipts" / ("d" * 64 + ".json")).is_file())
 
+    def test_credentialed_adapter_rejects_untrusted_direct_results_before_pack(self) -> None:
+        """A hostile City outbox must never reach the credentialed Pack boundary."""
+        context = patch_context()
+        child = {"key": "github-pr-docs-child:direct"}
+        admission = {
+            "schema_version": 1,
+            "kind": "github-docs-recursion-direct-admission",
+            "recursion_identity": "github-docs-recursion:17:test",
+            "admitted_child": child,
+            "patch_context": context,
+        }
+        update = {
+            "schema_version": 1,
+            "kind": "github-docs-recursion-direct-child-update",
+            "admitted_child": child,
+            "state": "blocked",
+            "patch_context": context,
+            "documentation_patch": None,
+        }
+        invalid = {
+            "unknown receipt": (None, {"handoff_id": "d" * 64, "update": update}),
+            "payload id mismatch": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": admission, "consumed": False}, {"handoff_id": "e" * 64, "update": update}),
+            "admitted child mismatch": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": admission, "consumed": False}, {"handoff_id": "d" * 64, "update": {**update, "admitted_child": {"key": "other"}}}),
+            "patch context mismatch": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": admission, "consumed": False}, {"handoff_id": "d" * 64, "update": {**update, "patch_context": {"schema_version": 1}}}),
+            "consumed receipt": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": admission, "consumed": True}, {"handoff_id": "d" * 64, "update": update}),
+            "malformed admission": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": {**admission, "unexpected": True}, "consumed": False}, {"handoff_id": "d" * 64, "update": update}),
+            "malformed patch context": ({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": {**admission, "patch_context": {"schema_version": 1}}, "consumed": False}, {"handoff_id": "d" * 64, "update": {**update, "patch_context": {"schema_version": 1}}}),
+        }
+        for description, (receipt, payload) in invalid.items():
+            with self.subTest(description), tempfile.TemporaryDirectory() as temp:
+                root = pathlib.Path(temp)
+                outbox = root / "direct-results"
+                outbox.mkdir()
+                (outbox / ("d" * 64 + ".json")).write_text(json.dumps(payload))
+                if receipt is not None:
+                    handoffs = root / "docs-review" / "direct-handoffs"
+                    handoffs.mkdir(parents=True)
+                    (handoffs / ("d" * 64 + ".json")).write_text(json.dumps(receipt))
+                environment = {
+                    "GC_GITHUB_DOCS_DIRECT_RESULT_DIR": str(outbox),
+                    "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "docs-review" / "assignments"),
+                    "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts",
+                }
+                with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.subprocess, "run") as command:
+                    self.assertEqual(adapter.publish_direct_child_results(), [])
+                command.assert_not_called()
+
     def test_legacy_journey_marker_uses_legacy_agent_in_direct_child_rig(self) -> None:
         """Catches stored legacy work being sent to the incompatible direct agent."""
         with tempfile.TemporaryDirectory() as temp:
