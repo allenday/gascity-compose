@@ -184,11 +184,7 @@ payload = json.dumps({
     "installation": {"id": 17},
     "action": "opened",
     "repository": {"id": 17},
-    "pull_request": {
-        "number": 9,
-        "head": {"sha": sha, "ref": "feature/docs"},
-        "base": {"ref": "main"},
-    },
+    "pull_request": {"number": 9, "head": {"sha": sha, "ref": "feature/docs"}},
 }).encode()
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -224,18 +220,14 @@ with tempfile.TemporaryDirectory() as temporary:
         elif job.kind == "project":
             run = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
             run.parent.mkdir(parents=True, exist_ok=True)
-            delivery = json.loads(job.payload)
-            source_branch = delivery["pull_request"]["head"]["ref"]
-            base_branch = delivery["pull_request"]["base"]["ref"]
-            assert source_branch != base_branch
             if not run.exists():
-                followup = {"source_key": source_key, "base": source_branch}
+                followup = {"source_key": source_key, "state": "intent-persisted"}
                 # The external controller saves its intent before its GitHub
                 # mutation.  Simulate City disappearing immediately after it.
                 run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup}), encoding="utf-8")
                 raise OSError("City recreated after durable follow-up intent")
             persisted = json.loads(run.read_text(encoding="utf-8"))
-            assert persisted["followup"] == {"source_key": source_key, "base": source_branch}
+            assert persisted["followup"] == {"source_key": source_key, "state": "intent-persisted"}
         return {}
 
     environment = {
@@ -260,8 +252,7 @@ with tempfile.TemporaryDirectory() as temporary:
     persisted_runs = list((review_root / "runs").glob("*.json"))
     assert len(persisted_runs) == 1
     persisted = json.loads(persisted_runs[0].read_text(encoding="utf-8"))
-    assert persisted["followup"] == {"source_key": source_key, "base": "feature/docs"}
-    assert persisted["followup"]["base"] != json.loads(payload)["pull_request"]["base"]["ref"]
+    assert persisted["followup"] == {"source_key": source_key, "state": "intent-persisted"}
     with sqlite3.connect(state_root / "gateway.sqlite") as connection:
         assert connection.execute("SELECT status, attempts FROM jobs WHERE kind = 'project'").fetchone() == ("complete", 1)
 PY

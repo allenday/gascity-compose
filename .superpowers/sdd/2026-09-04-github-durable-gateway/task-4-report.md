@@ -48,3 +48,11 @@ Pre-existing untracked `scripts/__pycache__/` and
   `pull_request.head.ref` and includes a distinct `pull_request.base.ref`.
   The assertions fail if the base branch is selected instead of the source
   branch.
+
+## Review follow-up (round 2/5)
+
+- The production Compose adapter test now constructs an assignment with a
+  distinct `evidence_bundle.source_head_ref` and asserts `_journey_request`
+  emits it as `default_branch`, never the proposal's `base_ref`.
+- The gateway restart smoke is limited to persisted follow-up-intent replay;
+  it no longer duplicates the adapter's source-branch mapping coverage.

@@ -92,14 +92,17 @@ class CandidateBridgeTests(unittest.TestCase):
 
     def test_docs_change_candidate_becomes_a_source_bound_journey_request(self) -> None:
         candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
+        source_assignment = assignment()
+        source_assignment["evidence_bundle"]["source_head_ref"] = "release/docs-revision"
 
-        request = adapter._journey_request(candidate, assignment(), "91")
+        request = adapter._journey_request(candidate, source_assignment, "91")
 
         self.assertEqual(request["repository"], "example/docs")
-        self.assertEqual(request["docs_impact_source_key"], assignment()["identity"]["source_key"])
+        self.assertEqual(request["docs_impact_source_key"], source_assignment["identity"]["source_key"])
+        self.assertEqual(request["default_branch"], "release/docs-revision")
+        self.assertNotEqual(request["default_branch"], source_assignment["evidence_bundle"]["proposal_identity"]["base_ref"])
         self.assertEqual(request["source"]["kind"], "github-pull-request")
         self.assertEqual(request["source"]["url"], "https://github.com/example/docs/pull/9")
-        self.assertEqual(request["default_branch"], "feature/docs-change")
         self.assertEqual(request["default_branch_sha"], SHA)
 
     def test_docs_change_candidate_is_admitted_projected_then_queued_for_city(self) -> None:
