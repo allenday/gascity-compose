@@ -16,8 +16,12 @@ mkdir -p "$pack/github/scripts" "$pack/github/agents/docs-impact-reviewer" "$pac
 : > "$pack/github/scripts/github_intake_docs_review_runtime.py"
 : > "$pack/github/scripts/github_intake_docs_impact.py"
 : > "$pack/github/scripts/github_intake_docs_journey_commands.py"
+: > "$pack/github/scripts/github_intake_docs_direct_child_admit.py"
+: > "$pack/github/scripts/github_intake_docs_direct_child_complete.py"
 : > "$pack/github/agents/docs-impact-reviewer/prompt.template.md"
 : > "$pack/github/agents/docs-journey/prompt.template.md"
+mkdir -p "$pack/github/agents/docs-recursion-direct-child"
+: > "$pack/github/agents/docs-recursion-direct-child/prompt.template.md"
 : > "$auth"
 
 env_file="$temp/github.env"

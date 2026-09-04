@@ -120,6 +120,9 @@ class CandidateBridgeTests(unittest.TestCase):
             "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"),
             "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs"),
         }
+        context_path = root / "direct-child-context" / f"{hashlib.sha256(assignment()['identity']['source_key'].encode()).hexdigest()}.json"
+        context_path.parent.mkdir()
+        context_path.write_text(json.dumps({"source_branch": "feature/docs-change", "installation_id": "91"}))
         admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": {"identity": "child", "key": "child"}}
         with mock.patch.dict(os.environ, {**environment, "GITHUB_INSTALLATION_ID": "91"}, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=json.dumps(admission), stderr="")) as command:
             marker = adapter._persist_direct_child(candidate)
@@ -142,6 +145,9 @@ class CandidateBridgeTests(unittest.TestCase):
             store = mock.Mock()
             store.load.return_value = {"assignment": assignment()}
             environment = {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs")}
+            context_path = root / "direct-child-context" / f"{hashlib.sha256(assignment()['identity']['source_key'].encode()).hexdigest()}.json"
+            context_path.parent.mkdir()
+            context_path.write_text(json.dumps({"source_branch": "feature/docs-change", "installation_id": "91"}))
             admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": {"identity": "child", "key": "child"}}
             with mock.patch.dict(os.environ, {**environment, "GITHUB_INSTALLATION_ID": "91"}, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=json.dumps(admission), stderr="")):
                 first = adapter._persist_direct_child(candidate)

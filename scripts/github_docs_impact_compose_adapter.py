@@ -220,7 +220,7 @@ def _gateway(payload: dict[str, Any] | None = None) -> impact.GitHubAppProjectio
     return impact.GitHubAppProjectionGateway(app, installation_id)
 
 
-def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any]) -> dict[str, Any]:
+def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any], signed_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Normalize one blocking review into the one-child PR recursion contract."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
     identity = artifact.get("identity") if isinstance(artifact, dict) else None
@@ -233,7 +233,7 @@ def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any])
     pr_number = identity.get("pr_number")
     head_sha = str(identity.get("head_sha") or "").lower()
     source_key = str(identity.get("source_key") or "")
-    followup_base = str(evidence_bundle.get("source_head_ref") or "")
+    followup_base = str((signed_context or {}).get("source_branch") or evidence_bundle.get("source_head_ref") or "")
     if (not repository_id or not repository or type(pr_number) is not int or not head_sha
             or not source_key or not followup_base or not isinstance(coverage_cells, list)
             or not coverage_cells or not all(isinstance(cell, dict) for cell in coverage_cells)):
@@ -276,8 +276,15 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     review_run = review_store.load(source_key)
     if review_run is None or not isinstance(review_run.get("assignment"), dict):
         raise ValueError("docs-change candidate has no durable assignment")
-    request = _direct_child_request(candidate, review_run["assignment"])
-    context = {"repository_id": request["repository_id"], "repository": request["repository"], "pr_number": request["pr_number"], "source_key": request["source_key"], "reviewed_head_sha": request["snapshot_sha"], "source_branch": request["source_branch"], "source_url": f"https://github.com/{request['repository']}/pull/{request['pr_number']}", "installation_id": str(os.environ.get("GITHUB_INSTALLATION_ID", ""))}
+    context_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-context" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+    signed_context = json.loads(context_path.read_text(encoding="utf-8"))
+    request = _direct_child_request(candidate, review_run["assignment"], signed_context)
+    installation_id = str(os.environ.get("GITHUB_INSTALLATION_ID", "") or signed_context.get("installation_id", "")).strip()
+    if not installation_id:
+        config = common.load_effective_config()
+        app = config.get("app") if isinstance(config, dict) else {}
+        installation_id = str((app or {}).get("installation_id", "")).strip()
+    context = {"repository_id": request["repository_id"], "repository": request["repository"], "pr_number": request["pr_number"], "source_key": request["source_key"], "reviewed_head_sha": request["snapshot_sha"], "source_branch": request["source_branch"], "source_url": f"https://github.com/{request['repository']}/pull/{request['pr_number']}", "installation_id": installation_id}
     payload = {"assignment_bytes": __import__("base64").b64encode(_assignment_bytes(review_run["assignment"])).decode(), "candidate": candidate, "context": context}
     command = [sys.executable, f"{PACK_SCRIPTS}/github_intake_docs_direct_child_admit.py", "--once", "--store", str(_path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))]
     result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
@@ -408,6 +415,9 @@ def intake(payload: dict[str, Any], token: str, now: float) -> dict[str, Any]:
     files = common.github_api_paginated_list_request("GET", path, bearer_token=token)
     assignment = runtime.assignment_from_paginated_evidence(delivery, [files])
     store = runtime.FileDocsReviewStore(_path_env("GC_GITHUB_DOCS_REVIEW_RUNS_DIR"))
+    delivery_context = {"source_branch": delivery["head_ref"], "installation_id": _installation_id(payload)}
+    context_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-context" / f"{hashlib.sha256(assignment['identity']['source_key'].encode()).hexdigest()}.json"
+    _atomic_write(context_path, _assignment_bytes(delivery_context))
     return runtime.intake_delivery(store, assignment, ComposeAdapter(store, _gateway(payload)), now=now)
 
 
