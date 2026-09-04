@@ -20,6 +20,7 @@ mkdir -p "$pack/github/scripts" "$pack/github/agents/docs-impact-reviewer" "$pac
 : > "$pack/github/scripts/github_intake_docs_direct_child_complete.py"
 : > "$pack/github/agents/docs-impact-reviewer/prompt.template.md"
 : > "$pack/github/agents/docs-journey/prompt.template.md"
+: > "$pack/github/agents/docs-journey/agent.toml"
 mkdir -p "$pack/github/agents/docs-recursion-direct-child"
 : > "$pack/github/agents/docs-recursion-direct-child/prompt.template.md"
 : > "$pack/github/agents/docs-recursion-direct-child/agent.toml"
@@ -87,6 +88,22 @@ if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then
 fi
 grep -q 'github/agents/docs-recursion-direct-child/agent.toml' "$temp/out"
 : > "$pack/github/agents/docs-recursion-direct-child/agent.toml"
+
+rm "$pack/github/agents/docs-journey/prompt.template.md"
+if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then
+  echo 'preflight accepted a pack without the legacy journey prompt' >&2
+  exit 1
+fi
+grep -q 'github/agents/docs-journey/prompt.template.md' "$temp/out"
+: > "$pack/github/agents/docs-journey/prompt.template.md"
+
+rm "$pack/github/agents/docs-journey/agent.toml"
+if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then
+  echo 'preflight accepted a pack without the legacy journey agent manifest' >&2
+  exit 1
+fi
+grep -q 'github/agents/docs-journey/agent.toml' "$temp/out"
+: > "$pack/github/agents/docs-journey/agent.toml"
 
 sed -i 's#GITHUB_PACK_DIR=.*#GITHUB_PACK_DIR=relative-pack#' "$env_file"
 if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then
