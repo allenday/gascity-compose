@@ -17,11 +17,18 @@ if PACK_SCRIPTS not in sys.path:
     sys.path.insert(0, PACK_SCRIPTS)
 
 import github_intake_common as common
-from github_durable_gateway import GatewayStore, worker_loop
+from github_durable_gateway import (
+    GatewayStore,
+    InputValidationError,
+    PULL_REQUEST_ACTIONS,
+    WORKER_STALL_SECONDS,
+    WorkerHealth,
+    validate_pull_request_payload,
+    worker_loop,
+)
 
 
 MAX_PAYLOAD_BYTES = 1_048_576
-PULL_REQUEST_ACTIONS = {"opened", "reopened", "synchronize", "ready_for_review"}
 
 
 def _app() -> dict[str, object]:
@@ -47,7 +54,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
-            self._reply(HTTPStatus.OK, {"status": "ok"})
+            try:
+                now = int(getattr(self.server, "clock", time.time)())
+                store = getattr(self.server, "gateway_store", None) or GatewayStore()
+                worker_health = getattr(self.server, "worker_health", None)
+                if worker_health is None:
+                    worker_health = WorkerHealth()
+                try:
+                    stall_seconds = max(1, int(float(os.environ.get("GC_GITHUB_GATEWAY_STALL_SECONDS", str(WORKER_STALL_SECONDS)))))
+                except ValueError:
+                    stall_seconds = WORKER_STALL_SECONDS
+                worker = worker_health.snapshot(now, stall_seconds)
+                payload = {
+                    "status": "ok" if worker["running"] and not worker["stalled"] else "unhealthy",
+                    **store.queue_status(now),
+                    "worker": worker,
+                }
+                status = HTTPStatus.OK if payload["status"] == "ok" else HTTPStatus.SERVICE_UNAVAILABLE
+                self._reply(status, payload)
+            except Exception:
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, {"status": "unhealthy", "error": "status_unavailable"})
             return
         self._reply(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
@@ -70,6 +96,10 @@ class Handler(BaseHTTPRequestHandler):
             if not secret or not common.verify_github_signature(secret, payload, signature):
                 self._reply(HTTPStatus.UNAUTHORIZED, {"error": "invalid_signature"})
                 return
+        except (OSError, ValueError):
+            self._reply(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "intake_failed"})
+            return
+        try:
             event = self.headers.get("X-GitHub-Event", "")
             document = json.loads(payload)
             if event != "pull_request" or not isinstance(document, dict) or document.get("action") not in PULL_REQUEST_ACTIONS:
@@ -77,10 +107,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             delivery_id = self.headers.get("X-GitHub-Delivery", "").strip()
             if not delivery_id:
-                raise ValueError("GitHub delivery id is required")
-            GatewayStore().enqueue_delivery(delivery_id, event, payload, int(time.time()))
+                raise InputValidationError("GitHub delivery id is required")
+            validate_pull_request_payload(payload)
+        except (InputValidationError, UnicodeDecodeError, json.JSONDecodeError):
+            self._reply(HTTPStatus.BAD_REQUEST, {"error": "invalid_payload"})
+            return
+        try:
+            store = getattr(self.server, "gateway_store", None) or GatewayStore()
+            clock = getattr(self.server, "clock", time.time)
+            store.enqueue_delivery(delivery_id, event, payload, int(clock()))
             self._reply(HTTPStatus.ACCEPTED, {"accepted": True})
-        except (OSError, ValueError, json.JSONDecodeError):
+        except Exception:
             # Return a retryable failure without leaking configuration or GitHub
             # response details to the public endpoint.
             self._reply(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "intake_failed"})
@@ -89,8 +126,14 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("GC_SERVICE_HOST", "0.0.0.0")
     port = int(os.environ.get("GC_SERVICE_PORT", "8080"))
-    threading.Thread(target=worker_loop, name="github-durable-gateway", daemon=True).start()
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    store = GatewayStore()
+    worker_health = WorkerHealth()
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.gateway_store = store
+    server.worker_health = worker_health
+    server.clock = time.time
+    threading.Thread(target=worker_loop, args=(store, worker_health), name="github-durable-gateway", daemon=True).start()
+    server.serve_forever()
 
 
 if __name__ == "__main__":

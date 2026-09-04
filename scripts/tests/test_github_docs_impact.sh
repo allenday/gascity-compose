@@ -63,6 +63,14 @@ require_webhook() {
   }
 }
 
+forbid_webhook() {
+  pattern=$1
+  if printf '%s\n' "$webhook_block" | grep -Eq -- "$pattern"; then
+    echo "forbidden $pattern in github-webhook" >&2
+    exit 1
+  fi
+}
+
 require_city() {
   pattern=$1
   printf '%s\n' "$city_block" | grep -Eq "$pattern" || {
@@ -142,16 +150,18 @@ done
 require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
 require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
-require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
-require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
+require_webhook 'scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro'
+require_webhook 'scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro'
+require_webhook 'scripts/github_docs_impact_compose_adapter.py:/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py:ro'
 require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
 if printf '%s\n' "$webhook_block" | grep -Eq 'network_mode: "service:city"'; then
   echo 'github-webhook must not share City network mode' >&2
   exit 1
 fi
-require_webhook 'GC_HOME: /var/lib/gascity'
-require_webhook 'state/gc-runtime:/var/lib/gascity'
 require_webhook 'github_docs_impact_webhook.py'
+for forbidden in 'GC_CITY_ROOT:' 'GC_HOME:' 'BEADS_DIR:' 'GC_GITHUB_INTAKE_DIRECT_BD:' 'GC_CITY_DOCS_REVIEW_RIG_DIR:' 'CITY_DIR.*:.*CITY_DIR' 'GC_CITY_DOCS_REVIEW_RIG_DIR.*:.*GC_CITY_DOCS_REVIEW_RIG_DIR' 'state/gc-runtime:/var/lib/gascity' '- \./:/opt/gascity-compose:ro'; do
+  forbid_webhook "$forbidden"
+done
 
 # This local fixture exercises the real durable gateway store while keeping the
 # City and GitHub boundaries deterministic.  It proves that recreating City
@@ -183,8 +193,12 @@ source_key = f"github-pr:17:9:{sha}"
 payload = json.dumps({
     "installation": {"id": 17},
     "action": "opened",
-    "repository": {"id": 17},
-    "pull_request": {"number": 9, "head": {"sha": sha, "ref": "feature/docs"}},
+    "repository": {"id": 17, "full_name": "example/docs"},
+    "pull_request": {
+        "number": 9,
+        "base": {"sha": "b" * 40, "ref": "main", "repo": {"id": 17, "full_name": "example/docs"}},
+        "head": {"sha": sha, "ref": "feature/docs", "repo": {"id": 17, "full_name": "example/docs"}},
+    },
 }).encode()
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -237,8 +251,8 @@ with tempfile.TemporaryDirectory() as temporary:
     }
     with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
         for now in range(100, 103):
-            assert gateway.process_one(store, now)
-        assert not gateway.process_one(store, 103)
+            assert gateway.process_one(store, now, clock=lambda now=now: now)
+        assert not gateway.process_one(store, 103, clock=lambda: 103)
 
         # Recreate City only, then reopen the same mounted gateway state and
         # retry after its bounded backoff.  The persisted intent is adopted.
@@ -246,8 +260,8 @@ with tempfile.TemporaryDirectory() as temporary:
         shutil.rmtree(city_root)
         city_root.mkdir()
         restarted_city_store = gateway.GatewayStore(state_root)
-        assert gateway.process_one(restarted_city_store, 105)
-        assert not gateway.process_one(restarted_city_store, 106)
+        assert gateway.process_one(restarted_city_store, 105, clock=lambda: 105)
+        assert not gateway.process_one(restarted_city_store, 106, clock=lambda: 106)
 
     persisted_runs = list((review_root / "runs").glob("*.json"))
     assert len(persisted_runs) == 1
@@ -256,3 +270,5 @@ with tempfile.TemporaryDirectory() as temporary:
     with sqlite3.connect(state_root / "gateway.sqlite") as connection:
         assert connection.execute("SELECT status, attempts FROM jobs WHERE kind = 'project'").fetchone() == ("complete", 1)
 PY
+
+sh "$root/scripts/tests/test_github_gateway_compose_restart.sh"

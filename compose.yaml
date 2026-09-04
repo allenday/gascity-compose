@@ -67,12 +67,9 @@ services:
       GC_SERVICE_PORT: "8080"
       # Reuse the protected App configuration imported by the prior service.
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
-      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /var/lib/gascity
       HOME: /var/lib/github-intake/home
-      BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
-      GC_GITHUB_INTAKE_DIRECT_BD: "1"
-      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
+      # Persistent adapter failures make health unhealthy after this bound.
+      GC_GITHUB_GATEWAY_STALL_SECONDS: "600"
       # The adapter records a run before it dispatches an immutable assignment.
       # Its separate runtime loop accepts candidates and reconciles restarts.
       GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
@@ -84,11 +81,15 @@ services:
       GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
     volumes:
       - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ./:/opt/gascity-compose:ro
-      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
+      - ./scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro
+      - ./scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro
+      - ./scripts/github_docs_impact_compose_adapter.py:/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py:ro
       - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/var/lib/gascity
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     security_opt:
       - no-new-privileges:true
     cap_drop:

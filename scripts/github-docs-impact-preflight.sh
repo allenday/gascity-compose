@@ -42,7 +42,7 @@ with sqlite3.connect(path) as connection:
         count = connection.execute(
             """
             SELECT COUNT(*) FROM jobs
-            WHERE status != 'complete' AND available_at <= ?
+            WHERE status IN ('pending', 'leased') AND available_at <= ?
               AND (lease_until IS NULL OR lease_until <= ?)
             """,
             (now, now),
@@ -50,7 +50,7 @@ with sqlite3.connect(path) as connection:
         oldest = connection.execute(
             """
             SELECT id FROM jobs
-            WHERE status != 'complete' AND available_at <= ?
+            WHERE status IN ('pending', 'leased') AND available_at <= ?
               AND (lease_until IS NULL OR lease_until <= ?)
             ORDER BY available_at, id LIMIT 1
             """,

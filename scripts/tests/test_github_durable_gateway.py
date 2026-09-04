@@ -11,7 +11,7 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
-from urllib import request
+from urllib import error, request
 
 
 MODULE_PATH = pathlib.Path(__file__).resolve().parents[1] / "github_durable_gateway.py"
@@ -34,19 +34,46 @@ sys.modules[webhook_spec.name] = webhook
 webhook_spec.loader.exec_module(webhook)
 
 
-def _post_webhook(body: bytes, headers: dict[str, str]) -> tuple[int, dict[str, object]]:
-    server = webhook.ThreadingHTTPServer(("127.0.0.1", 0), webhook.Handler)
-    thread = threading.Thread(target=server.serve_forever)
+def _request_json(path: str, *, body: bytes | None = None, headers: dict[str, str] | None = None, server: object | None = None) -> tuple[int, dict[str, object]]:
+    httpd = server or webhook.ThreadingHTTPServer(("127.0.0.1", 0), webhook.Handler)
+    assert isinstance(httpd, webhook.ThreadingHTTPServer)
+    thread = threading.Thread(target=httpd.serve_forever)
     thread.start()
     try:
-        endpoint = f"http://127.0.0.1:{server.server_port}/v0/github/webhook"
-        message = request.Request(endpoint, data=body, headers=headers, method="POST")
-        with request.urlopen(message) as response:
-            return response.status, json.loads(response.read())
+        endpoint = f"http://127.0.0.1:{httpd.server_port}{path}"
+        message = request.Request(endpoint, data=body, headers=headers or {}, method="POST" if body is not None else "GET")
+        try:
+            with request.urlopen(message) as response:
+                return response.status, json.loads(response.read())
+        except error.HTTPError as exc:
+            try:
+                return exc.code, json.loads(exc.read())
+            finally:
+                exc.close()
     finally:
-        server.shutdown()
+        httpd.shutdown()
         thread.join()
-        server.server_close()
+        httpd.server_close()
+
+
+def _post_webhook(body: bytes, headers: dict[str, str], *, server: object | None = None) -> tuple[int, dict[str, object]]:
+    return _request_json("/v0/github/webhook", body=body, headers=headers, server=server)
+
+
+def _valid_payload(*, action: str = "opened", sha: str = "a" * 40) -> bytes:
+    return json.dumps(
+        {
+            "action": action,
+            "installation": {"id": 23},
+            "repository": {"id": 17, "full_name": "example/docs"},
+            "pull_request": {
+                "number": 9,
+                "base": {"ref": "main", "sha": "b" * 40, "repo": {"id": 17, "full_name": "example/docs"}},
+                "head": {"ref": "feature/docs", "sha": sha, "repo": {"id": 17, "full_name": "example/docs"}},
+            },
+        },
+        sort_keys=True,
+    ).encode()
 
 
 class GatewayStoreTests(unittest.TestCase):
@@ -111,6 +138,22 @@ class GatewayStoreTests(unittest.TestCase):
             self.assertTrue(store.complete(job.id, job.lease_token))
             self.assertIsNone(store.claim(job.lease_until))
 
+    def test_terminal_input_failure_is_excluded_from_claims_and_queue_status(self) -> None:
+        """Catches a legacy poison delivery remaining runnable forever."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            store.enqueue_delivery("delivery-poison", "pull_request", b'{"action":"opened"}', 100)
+
+            self.assertFalse(gateway.process_one(store, 100, clock=lambda: 101))
+            self.assertIsNone(store.claim(1_000))
+            self.assertEqual(store.queue_status(1_000), {"runnable_jobs": 0, "oldest_runnable_job": None})
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                self.assertEqual(
+                    connection.execute("SELECT status, attempts, completed_at FROM jobs").fetchone(),
+                    ("failed", 0, 101),
+                )
+
     def test_stale_worker_cannot_mutate_reclaimed_lease(self) -> None:
         """Catches a late worker clearing the lease owned by a newer claim."""
         with tempfile.TemporaryDirectory() as temp:
@@ -134,7 +177,7 @@ class GatewayIngressWorkerTests(unittest.TestCase):
         """Catches a 202 acknowledgement emitted before the inbox transaction commits."""
         with tempfile.TemporaryDirectory() as temp:
             store = gateway.GatewayStore(pathlib.Path(temp))
-            payload = b'{"action":"opened"}'
+            payload = _valid_payload()
             headers = {
                 "Content-Type": "application/json",
                 "X-GitHub-Event": "pull_request",
@@ -149,27 +192,123 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
                 self.assertEqual(connection.execute("SELECT delivery_id, payload FROM deliveries").fetchall(), [("delivery-http-123", payload)])
 
+    def test_signed_malformed_delivery_is_rejected_without_persistence_on_replay(self) -> None:
+        """Catches an authenticated malformed payload entering an infinite retry loop."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            payload = b'{"action":"opened"}'
+            headers = {
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "pull_request",
+                "X-GitHub-Delivery": "delivery-malformed-123",
+                "X-Hub-Signature-256": "sha256=verified",
+            }
+            with mock.patch.object(webhook, "GatewayStore", return_value=store), mock.patch.object(webhook, "_app", return_value={"webhook_secret": "secret"}), mock.patch.object(webhook.common, "verify_github_signature", return_value=True):
+                first = _post_webhook(payload, headers)
+                replay = _post_webhook(payload, headers)
+
+            self.assertEqual(first, (400, {"error": "invalid_payload"}))
+            self.assertEqual(replay, first)
+            with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 0)
+
+    def test_health_exposes_queue_and_turns_unhealthy_after_bounded_failed_progress(self) -> None:
+        """Catches a live HTTP process hiding a persistently stuck worker."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            store.enqueue_delivery("delivery-health", "pull_request", _valid_payload(), 100)
+            worker_health = gateway.WorkerHealth()
+            worker_health.started(100)
+            server = webhook.ThreadingHTTPServer(("127.0.0.1", 0), webhook.Handler)
+            server.gateway_store = store
+            server.worker_health = worker_health
+            server.clock = lambda: 101
+            with mock.patch.dict(os.environ, {"GC_GITHUB_GATEWAY_STALL_SECONDS": "30"}, clear=False):
+                healthy = _request_json("/healthz", server=server)
+
+                worker_health.failed(102, "City unavailable")
+                stalled_server = webhook.ThreadingHTTPServer(("127.0.0.1", 0), webhook.Handler)
+                stalled_server.gateway_store = store
+                stalled_server.worker_health = worker_health
+                stalled_server.clock = lambda: 132
+                unhealthy = _request_json("/healthz", server=stalled_server)
+
+            self.assertEqual(healthy[0], 200)
+            self.assertEqual(healthy[1]["runnable_jobs"], 1)
+            self.assertEqual(
+                healthy[1]["oldest_runnable_job"],
+                {"available_at": 100, "delivery_id": "delivery-health", "id": 1, "kind": "intake"},
+            )
+            self.assertEqual(healthy[1]["worker"]["running"], True)
+            self.assertEqual(unhealthy[0], 503)
+            self.assertEqual(unhealthy[1]["status"], "unhealthy")
+            self.assertEqual(unhealthy[1]["worker"]["stalled"], True)
+
+    def test_health_is_unhealthy_when_worker_has_exited(self) -> None:
+        """Catches a dead daemon worker leaving the ingress health check green."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            worker_health = gateway.WorkerHealth()
+            worker_health.started(100)
+            worker_health.stopped(101, "database unavailable")
+            server = webhook.ThreadingHTTPServer(("127.0.0.1", 0), webhook.Handler)
+            server.gateway_store = store
+            server.worker_health = worker_health
+            server.clock = lambda: 102
+
+            status, response = _request_json("/healthz", server=server)
+
+            self.assertEqual(status, 503)
+            self.assertEqual(response["worker"]["running"], False)
+
+    def test_worker_health_marks_one_overlong_attempt_stalled(self) -> None:
+        """Catches a hung adapter attempt remaining healthy forever."""
+        worker_health = gateway.WorkerHealth()
+        worker_health.started(100)
+        worker_health.attempt_started(101)
+
+        status = worker_health.snapshot(131, 30)
+
+        self.assertEqual(status["stalled"], True)
+        self.assertEqual(status["attempt_started_at"], 101)
+
+    def test_uncaught_worker_error_records_that_the_worker_exited(self) -> None:
+        """Catches a worker-loop crash leaving its liveness state running."""
+        class BrokenStore:
+            def claim(self, _now: int) -> None:
+                raise OSError("database unavailable")
+
+        worker_health = gateway.WorkerHealth()
+        with self.assertRaisesRegex(OSError, "database unavailable"):
+            gateway.worker_loop(BrokenStore(), worker_health, clock=lambda: 100, sleeper=lambda _interval: None)
+
+        status = worker_health.snapshot(101, 30)
+        self.assertEqual(status["running"], False)
+        self.assertEqual(status["last_error"], "database unavailable")
+
     def test_intake_exception_releases_the_existing_delivery_for_retry(self) -> None:
         """Catches worker failures losing work or inserting a duplicate delivery."""
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             store = gateway.GatewayStore(root)
-            self.assertTrue(store.enqueue_delivery("delivery-worker-123", "pull_request", b'{"action":"opened"}', 100))
+            payload = _valid_payload()
+            self.assertTrue(store.enqueue_delivery("delivery-worker-123", "pull_request", payload, 100))
 
             with mock.patch.object(gateway, "_run_adapter", side_effect=ValueError("GitHub unavailable")):
-                self.assertFalse(gateway.process_one(store, 100))
+                self.assertFalse(gateway.process_one(store, 100, clock=lambda: 150))
 
-            self.assertFalse(store.enqueue_delivery("delivery-worker-123", "pull_request", b'{"action":"opened"}', 101))
+            self.assertFalse(store.enqueue_delivery("delivery-worker-123", "pull_request", payload, 101))
             with sqlite3.connect(root / "gateway.sqlite") as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 1)
-                self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs").fetchone(), ("pending", 1, None))
+                self.assertEqual(connection.execute("SELECT status, attempts, available_at, lease_until FROM jobs").fetchone(), ("pending", 1, 152, None))
 
     def test_empty_reconciliation_keeps_dispatch_retryable(self) -> None:
         """Catches a zero-exit polling pass completing City dispatch before it happens."""
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             store = gateway.GatewayStore(root)
-            payload = json.dumps({"action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": "a" * 40}}}).encode()
+            payload = _valid_payload()
             store.enqueue_delivery("delivery-dispatch-123", "pull_request", payload, 100)
             review_root = root / "docs-review"
             environment = {
@@ -194,7 +333,7 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 store = gateway.GatewayStore(root)
                 sha = "a" * 40
                 source_key = f"github-pr:17:9:{sha}"
-                payload = json.dumps({"action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": sha}}}).encode()
+                payload = _valid_payload(sha=sha)
                 store.enqueue_delivery(f"delivery-{stage}-123", "pull_request", payload, 100)
                 review_root = root / "docs-review"
                 environment = {
@@ -232,7 +371,7 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             store = gateway.GatewayStore(root)
             sha = "a" * 40
             source_key = f"github-pr:17:9:{sha}"
-            payload = json.dumps({"installation": {"id": 17}, "action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": sha}}}).encode()
+            payload = _valid_payload(sha=sha)
             store.enqueue_delivery("delivery-stages-123", "pull_request", payload, 100)
             seen: list[tuple[str, bytes]] = []
             review_root = root / "docs-review"

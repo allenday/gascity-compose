@@ -102,6 +102,7 @@ with sqlite3.connect(sys.argv[1]) as connection:
             (7, "pending", 100, None),
             (8, "pending", 4_000_000_000, None),
             (9, "complete", 1, None),
+            (10, "failed", 1, None),
         ),
     )
 PY

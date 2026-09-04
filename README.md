@@ -72,9 +72,13 @@ proposal diff or deployment-admin page is linked from GitHub.
 
 The gateway keeps its accepted-delivery inbox and leased lifecycle jobs in
 `state/github-intake/gateway.sqlite`; do not remove this file when recreating
-only `city`. To replay the existing external docs-impact controller once during
-development (without creating a separate controller or a new GitHub delivery),
-run:
+only `city`. Its container health check reads `/healthz`, which reports the
+runnable job count, the oldest runnable job, and worker liveness. An overlong
+adapter attempt or persistent adapter failures make health unhealthy after 600
+seconds without a successful job advancement;
+`GC_GITHUB_GATEWAY_STALL_SECONDS` can set a different bounded threshold. To
+replay the existing external docs-impact controller once during development
+(without creating a separate controller or a new GitHub delivery), run:
 
 ```bash
 docker compose --profile github-docs-impact exec github-webhook \
