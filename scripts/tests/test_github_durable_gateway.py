@@ -154,6 +154,24 @@ class GatewayStoreTests(unittest.TestCase):
                     ("failed", 0, 101),
                 )
 
+    def test_legacy_delivery_with_non_scalar_installation_id_is_terminal(self) -> None:
+        """Catches legacy malformed installation IDs being retried by a worker."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            document = json.loads(_valid_payload())
+            document["installation"]["id"] = [23]
+            store.enqueue_delivery("delivery-legacy-installation-type", "pull_request", json.dumps(document).encode(), 100)
+
+            with mock.patch.object(gateway, "_run_adapter") as run_adapter:
+                self.assertFalse(gateway.process_one(store, 100, clock=lambda: 101))
+            run_adapter.assert_not_called()
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                self.assertEqual(
+                    connection.execute("SELECT status, attempts, completed_at FROM jobs").fetchone(),
+                    ("failed", 0, 101),
+                )
+
     def test_stale_worker_cannot_mutate_reclaimed_lease(self) -> None:
         """Catches a late worker clearing the lease owned by a newer claim."""
         with tempfile.TemporaryDirectory() as temp:
@@ -201,6 +219,29 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 "Content-Type": "application/json",
                 "X-GitHub-Event": "pull_request",
                 "X-GitHub-Delivery": "delivery-malformed-123",
+                "X-Hub-Signature-256": "sha256=verified",
+            }
+            with mock.patch.object(webhook, "GatewayStore", return_value=store), mock.patch.object(webhook, "_app", return_value={"webhook_secret": "secret"}), mock.patch.object(webhook.common, "verify_github_signature", return_value=True):
+                first = _post_webhook(payload, headers)
+                replay = _post_webhook(payload, headers)
+
+            self.assertEqual(first, (400, {"error": "invalid_payload"}))
+            self.assertEqual(replay, first)
+            with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 0)
+
+    def test_signed_delivery_with_non_scalar_installation_id_is_rejected_without_persistence_on_replay(self) -> None:
+        """Catches a signed list installation ID being coerced into retryable work."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            document = json.loads(_valid_payload())
+            document["installation"]["id"] = [23]
+            payload = json.dumps(document, sort_keys=True).encode()
+            headers = {
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "pull_request",
+                "X-GitHub-Delivery": "delivery-installation-type-123",
                 "X-Hub-Signature-256": "sha256=verified",
             }
             with mock.patch.object(webhook, "GatewayStore", return_value=store), mock.patch.object(webhook, "_app", return_value={"webhook_secret": "secret"}), mock.patch.object(webhook.common, "verify_github_signature", return_value=True):

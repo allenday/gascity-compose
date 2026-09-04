@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sqlite3
 import subprocess
 import sys
@@ -24,6 +25,7 @@ WORKER_STALL_SECONDS = 600
 ADAPTER_PATH = pathlib.Path(__file__).with_name("github_docs_impact_compose_adapter.py")
 NEXT_JOB_KIND = {"intake": "dispatch", "dispatch": "harvest", "harvest": "project", "project": None}
 PULL_REQUEST_ACTIONS = {"opened", "reopened", "synchronize", "ready_for_review"}
+GIT_COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
 
 
 class InputValidationError(ValueError):
@@ -138,31 +140,43 @@ def validate_pull_request_payload(payload: bytes) -> dict[str, object]:
     head_repository = head.get("repo") if isinstance(head, dict) else None
 
     installation_id = installation.get("id") if isinstance(installation, dict) else None
-    repository_id = str(repository.get("id") or "") if isinstance(repository, dict) else ""
-    repository_name = str(repository.get("full_name") or "") if isinstance(repository, dict) else ""
+    repository_id = repository.get("id") if isinstance(repository, dict) else None
+    repository_name = repository.get("full_name") if isinstance(repository, dict) else None
     number = pull_request.get("number") if isinstance(pull_request, dict) else None
-    head_sha = str(head.get("sha") or "").lower() if isinstance(head, dict) else ""
-    head_ref = str(head.get("ref") or "") if isinstance(head, dict) else ""
-    base_sha = str(base.get("sha") or "").lower() if isinstance(base, dict) else ""
-    base_ref = str(base.get("ref") or "") if isinstance(base, dict) else ""
-    head_repository_id = str(head_repository.get("id") or "") if isinstance(head_repository, dict) else ""
-    head_repository_name = str(head_repository.get("full_name") or "") if isinstance(head_repository, dict) else ""
-    base_repository_id = str(base_repository.get("id") or "") if isinstance(base_repository, dict) else ""
-    base_repository_name = str(base_repository.get("full_name") or "") if isinstance(base_repository, dict) else ""
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    head_ref = head.get("ref") if isinstance(head, dict) else None
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    head_repository_id = head_repository.get("id") if isinstance(head_repository, dict) else None
+    head_repository_name = head_repository.get("full_name") if isinstance(head_repository, dict) else None
+    base_repository_id = base_repository.get("id") if isinstance(base_repository, dict) else None
+    base_repository_name = base_repository.get("full_name") if isinstance(base_repository, dict) else None
 
-    if installation_id is None or not str(installation_id).strip():
-        raise InputValidationError("pull_request webhook has no installation id")
+    def positive_integer(value: object) -> bool:
+        return type(value) is int and value > 0
+
+    def nonempty_string(value: object) -> bool:
+        return isinstance(value, str) and bool(value.strip())
+
+    def repository_full_name(value: object) -> bool:
+        return nonempty_string(value) and value.count("/") == 1 and all(part.strip() for part in value.split("/"))
+
+    if not positive_integer(installation_id):
+        raise InputValidationError("pull_request webhook has an invalid installation id")
     if (
-        not repository_id
-        or not repository_name
-        or type(number) is not int
-        or number <= 0
-        or not head_sha
-        or not head_ref
-        or not base_sha
-        or not base_ref
-        or not head_repository_id
-        or not head_repository_name
+        not positive_integer(repository_id)
+        or not repository_full_name(repository_name)
+        or not positive_integer(number)
+        or not isinstance(head_sha, str)
+        or GIT_COMMIT_SHA.fullmatch(head_sha) is None
+        or not nonempty_string(head_ref)
+        or not isinstance(base_sha, str)
+        or GIT_COMMIT_SHA.fullmatch(base_sha) is None
+        or not nonempty_string(base_ref)
+        or not positive_integer(head_repository_id)
+        or not repository_full_name(head_repository_name)
+        or not positive_integer(base_repository_id)
+        or not repository_full_name(base_repository_name)
     ):
         raise InputValidationError("pull_request webhook lacks immutable identity")
     if base_repository_id != repository_id or base_repository_name != repository_name:
