@@ -294,7 +294,19 @@ class GatewayStore:
                     WHERE jobs.status IN ('pending', 'leased')
                       AND jobs.available_at <= ?
                       AND (jobs.lease_until IS NULL OR jobs.lease_until <= ?)
-                    ORDER BY jobs.available_at, jobs.id
+                    -- Prefer newly received intake and its early handoff
+                    -- stages over stale reconciliation.  A newer PR head
+                    -- must not remain blocked behind a prior revision whose
+                    -- City worker is still producing evidence.
+                    ORDER BY CASE jobs.kind
+                                 WHEN 'intake' THEN 0
+                                 WHEN 'dispatch' THEN 1
+                                 WHEN 'harvest' THEN 2
+                                 WHEN 'project' THEN 3
+                                 ELSE 4
+                             END,
+                             deliveries.received_at DESC,
+                             jobs.id DESC
                     LIMIT 1
                     """,
                     (now, now),

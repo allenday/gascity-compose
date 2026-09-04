@@ -375,8 +375,8 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = 'dispatch'").fetchone(), ("pending", 1, None))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 0)
 
-    def test_new_intake_preempts_a_retrying_reconciliation_job(self) -> None:
-        """A fresh PR revision must not wait behind an older stalled reconcile."""
+    def test_newer_pr_revision_preempts_old_reconciliation_stages(self) -> None:
+        """A fresh PR revision must not sit behind stale harvest or dispatch work."""
         with tempfile.TemporaryDirectory() as temp:
             store = gateway.GatewayStore(pathlib.Path(temp))
             older = _valid_payload(sha="a" * 40)
@@ -387,13 +387,17 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             self.assertTrue(store.advance(first.id, first.lease_token, "dispatch", 100))
             dispatch = store.claim(100)
             assert dispatch is not None
-            self.assertTrue(store.retry(dispatch.id, dispatch.lease_token, "City reconciliation is pending", 100))
+            self.assertTrue(store.advance(dispatch.id, dispatch.lease_token, "harvest", 100))
             store.enqueue_delivery("delivery-newer", "pull_request", newer, 101)
 
             claimed = store.claim(102)
 
             assert claimed is not None
             self.assertEqual((claimed.delivery_id, claimed.kind), ("delivery-newer", "intake"))
+            self.assertTrue(store.advance(claimed.id, claimed.lease_token, "dispatch", 102))
+            claimed = store.claim(103)
+            assert claimed is not None
+            self.assertEqual((claimed.delivery_id, claimed.kind), ("delivery-newer", "dispatch"))
 
     def test_empty_reconciliation_keeps_harvest_and_project_retryable(self) -> None:
         """Catches later polling stages completing before their durable records exist."""
