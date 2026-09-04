@@ -617,37 +617,13 @@ def publish_direct_child_results() -> list[str]:
 
 
 def publish_legacy_journey_results() -> list[str]:
-    """Compatibility-only App-side projection for persisted legacy children."""
-    outbox = _path_env("GC_GITHUB_DOCS_LEGACY_RESULT_DIR")
-    receipt_root = outbox.parent / "legacy-result-receipts"
-    journey_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"
-    command_script = f"{os.environ.get('GC_GITHUB_PACK_SCRIPTS', '/opt/gascity-packs/github/scripts')}/github_intake_docs_journey_commands.py"
-    published: list[str] = []
-    for path in sorted(outbox.glob("*.json"))[:256]:
-        try:
-            digest = path.stem
-            stat = path.lstat()
-            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest) or not path.is_file() or path.is_symlink() or stat.st_size > 262_144:
-                continue
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or set(payload) != {"identity", "child_key", "admitted_child", "update"} or not isinstance(payload.get("identity"), str) or not isinstance(payload.get("update"), dict):
-                continue
-            receipt = receipt_root / path.name
-            if receipt.exists():
-                if json.loads(receipt.read_text(encoding="utf-8")).get("payload") != payload:
-                    continue
-                continue
-            recorded = subprocess.run([sys.executable, command_script, "record-child-update", "--once", "--store", str(journey_root), "--input", json.dumps({"identity": payload["identity"], "update": payload["update"]}, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-            if recorded.returncode:
-                continue
-            projected = subprocess.run([sys.executable, command_script, "project-until-settled", "--once", "--store", str(journey_root), "--identity", payload["identity"]], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-            if projected.returncode:
-                continue
-            _atomic_write(receipt, _assignment_bytes({"payload": payload, "record": json.loads(recorded.stdout), "projection": json.loads(projected.stdout)}))
-            published.append(digest)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
-            continue
-    return published
+    """Keep legacy evidence recoverable but never publish it without a receipt.
+
+    Legacy City markers predate trusted handoff receipts. Their hostile outbox
+    records are retained for operator migration, but cannot trigger Pack or
+    GitHub side effects.
+    """
+    return []
 
 
 class _ScopedDocsReviewStore:

@@ -173,7 +173,7 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
         return None
     if marker.get("kind") != "github-pr-docs-direct-child" or marker.get("dispatched") is not False:
         return None
-    if not isinstance(marker.get("handoff_id"), str) or len(marker["handoff_id"]) != 64:
+    if not isinstance(marker.get("handoff_id"), str) or len(marker["handoff_id"]) != 64 or any(char not in "0123456789abcdef" for char in marker["handoff_id"]):
         return None
     if marker.get("bead_id") is not None and (not isinstance(marker.get("bead_id"), str) or not marker["bead_id"]):
         return None
