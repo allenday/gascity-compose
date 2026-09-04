@@ -179,13 +179,16 @@ sys.modules[spec.name] = gateway
 spec.loader.exec_module(gateway)
 
 sha = "a" * 40
-source_branch = "feature/docs"
 source_key = f"github-pr:17:9:{sha}"
 payload = json.dumps({
     "installation": {"id": 17},
     "action": "opened",
     "repository": {"id": 17},
-    "pull_request": {"number": 9, "head": {"sha": sha, "ref": source_branch}},
+    "pull_request": {
+        "number": 9,
+        "head": {"sha": sha, "ref": "feature/docs"},
+        "base": {"ref": "main"},
+    },
 }).encode()
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -208,7 +211,6 @@ with tempfile.TemporaryDirectory() as temporary:
     city_root = pathlib.Path(temporary) / "city"
     store = gateway.GatewayStore(state_root)
     assert store.enqueue_delivery("followup-retry-delivery", "pull_request", payload, 100)
-    followup_intents = []
 
     def run_adapter(job):
         if job.kind == "dispatch":
@@ -222,13 +224,18 @@ with tempfile.TemporaryDirectory() as temporary:
         elif job.kind == "project":
             run = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
             run.parent.mkdir(parents=True, exist_ok=True)
-            if not followup_intents:
-                followup_intents.append({"source_key": source_key, "base": source_branch})
+            delivery = json.loads(job.payload)
+            source_branch = delivery["pull_request"]["head"]["ref"]
+            base_branch = delivery["pull_request"]["base"]["ref"]
+            assert source_branch != base_branch
+            if not run.exists():
+                followup = {"source_key": source_key, "base": source_branch}
                 # The external controller saves its intent before its GitHub
                 # mutation.  Simulate City disappearing immediately after it.
-                run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup_intents[0]}), encoding="utf-8")
+                run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup}), encoding="utf-8")
                 raise OSError("City recreated after durable follow-up intent")
-            run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup_intents[0]}), encoding="utf-8")
+            persisted = json.loads(run.read_text(encoding="utf-8"))
+            assert persisted["followup"] == {"source_key": source_key, "base": source_branch}
         return {}
 
     environment = {
@@ -250,7 +257,11 @@ with tempfile.TemporaryDirectory() as temporary:
         assert gateway.process_one(restarted_city_store, 105)
         assert not gateway.process_one(restarted_city_store, 106)
 
-    assert followup_intents == [{"source_key": source_key, "base": source_branch}]
+    persisted_runs = list((review_root / "runs").glob("*.json"))
+    assert len(persisted_runs) == 1
+    persisted = json.loads(persisted_runs[0].read_text(encoding="utf-8"))
+    assert persisted["followup"] == {"source_key": source_key, "base": "feature/docs"}
+    assert persisted["followup"]["base"] != json.loads(payload)["pull_request"]["base"]["ref"]
     with sqlite3.connect(state_root / "gateway.sqlite") as connection:
         assert connection.execute("SELECT status, attempts FROM jobs WHERE kind = 'project'").fetchone() == ("complete", 1)
 PY

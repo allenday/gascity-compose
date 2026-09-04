@@ -38,3 +38,13 @@ the development replay target.
 
 Pre-existing untracked `scripts/__pycache__/` and
 `scripts/tests/__pycache__/` directories were left untouched.
+
+## Review follow-up (round 1/5)
+
+- The retry fixture now reopens and reads the persisted review-run JSON before
+  completing the retried project job. It asserts that exactly one persisted run
+  contains the follow-up artifact, rather than relying on an in-memory list.
+- The fixture derives the follow-up base from the accepted delivery's
+  `pull_request.head.ref` and includes a distinct `pull_request.base.ref`.
+  The assertions fail if the base branch is selected instead of the source
+  branch.
