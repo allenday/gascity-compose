@@ -378,10 +378,10 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     if result.returncode:
         raise ValueError(result.stderr.strip() or "direct child admission failed")
     admission = json.loads(result.stdout)
-    if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child"}:
+    if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child", "patch_context"}:
         raise ValueError("direct child admission returned an invalid record")
     snapshot = _stage_direct_snapshot(request, installation_id)
-    marker = {**request, "snapshot": snapshot, "admission": admission, "direct_child": admission["admitted_child"], "bead_id": None, "dispatched": False}
+    marker = {**request, "snapshot": snapshot, "admission": admission, "direct_child": admission["admitted_child"], "patch_context": admission["patch_context"], "bead_id": None, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
 
