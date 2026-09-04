@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import json
 import os
-import pathlib
-import subprocess
-import tempfile
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -18,6 +17,7 @@ if PACK_SCRIPTS not in sys.path:
     sys.path.insert(0, PACK_SCRIPTS)
 
 import github_intake_common as common
+from github_durable_gateway import GatewayStore, worker_loop
 
 
 MAX_PAYLOAD_BYTES = 1_048_576
@@ -29,38 +29,6 @@ def _app() -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("GitHub App config is unavailable")
     return value
-
-
-def _run_intake(payload: bytes) -> dict[str, object]:
-    decoded = json.loads(payload)
-    if not isinstance(decoded, dict):
-        raise ValueError("webhook payload must be an object")
-    installation = (decoded.get("installation") or {}).get("id")
-    if installation is None:
-        raise ValueError("pull_request webhook has no installation id")
-    token = common.create_installation_token(_app(), str(installation))
-    with tempfile.NamedTemporaryFile(mode="wb", delete=False) as handle:
-        handle.write(payload)
-        path = pathlib.Path(handle.name)
-    try:
-        environment = dict(os.environ)
-        environment["GH_TOKEN"] = token
-        result = subprocess.run(
-            ["python3", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "intake", "--once", "--payload-file", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=environment,
-        )
-    finally:
-        path.unlink(missing_ok=True)
-    if result.returncode:
-        raise ValueError(result.stderr.strip() or "docs review intake failed")
-    try:
-        response = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError("docs review intake returned invalid JSON") from exc
-    return response if isinstance(response, dict) else {"accepted": True}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -107,7 +75,11 @@ class Handler(BaseHTTPRequestHandler):
             if event != "pull_request" or not isinstance(document, dict) or document.get("action") not in PULL_REQUEST_ACTIONS:
                 self._reply(HTTPStatus.ACCEPTED, {"accepted": False, "reason": "ignored"})
                 return
-            self._reply(HTTPStatus.ACCEPTED, _run_intake(payload))
+            delivery_id = self.headers.get("X-GitHub-Delivery", "").strip()
+            if not delivery_id:
+                raise ValueError("GitHub delivery id is required")
+            GatewayStore().enqueue_delivery(delivery_id, event, payload, int(time.time()))
+            self._reply(HTTPStatus.ACCEPTED, {"accepted": True})
         except (OSError, ValueError, json.JSONDecodeError):
             # Return a retryable failure without leaking configuration or GitHub
             # response details to the public endpoint.
@@ -117,6 +89,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("GC_SERVICE_HOST", "0.0.0.0")
     port = int(os.environ.get("GC_SERVICE_PORT", "8080"))
+    threading.Thread(target=worker_loop, name="github-durable-gateway", daemon=True).start()
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
