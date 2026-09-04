@@ -159,13 +159,13 @@ flowchart LR
 
 **Interfaces:**
 
-- Consumes: a SHA-bound `docs-change-required` candidate and Task 2's direct-child contract.
+- Consumes: a SHA-bound `docs-change-required` candidate and Task 2's persisted direct-child admission contract.
 - Produces: one durable direct-child dispatch marker keyed by the candidate digest and one validated worker result for the App publisher.
 - Removes: PR-path use of `GC_CITY_DOCS_JOURNEY_TARGET`, `journey-dispatch`, and generic controller command invocations.
 
 - [ ] **Step 1: Write failing Compose tests.**
 
-  Add a test that a PR `docs-change-required` candidate persists one direct-child request and does not invoke `github_intake_docs_journey_commands.py`, create a relay-only GitHub tracking issue, or write a `journey-dispatch` marker. Add a replay test proving the same candidate yields the same direct child and no duplicate follow-up intent.
+  Add a test that a PR `docs-change-required` candidate first receives its full Pack-issued recursion identity and admitted-child record, then persists one direct-child request and does not invoke `github_intake_docs_journey_commands.py`, create a relay-only GitHub tracking issue, or write a `journey-dispatch` marker. Add a replay test proving the same candidate yields the same direct child and no duplicate follow-up intent.
 
 - [ ] **Step 2: Run the focused Compose test and verify the expected failure.**
 
