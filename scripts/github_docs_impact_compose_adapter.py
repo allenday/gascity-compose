@@ -39,6 +39,11 @@ def _path_env(name: str) -> pathlib.Path:
     return pathlib.Path(value)
 
 
+def _city_review_dir() -> pathlib.Path:
+    """City-visible handoff state; never a trusted Pack-state parent."""
+    return _path_env("GC_GITHUB_DOCS_CITY_REVIEW_DIR")
+
+
 def _atomic_write(path: pathlib.Path, payload: bytes, mode: int = 0o600) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
@@ -147,9 +152,10 @@ def _harvest_city_candidates(source_key: str | None = None) -> list[str]:
     persisted assignment, then atomically creates the candidate envelope.
     """
     review_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR")
+    city_review = _city_review_dir()
     candidate_root = _path_env("GC_GITHUB_DOCS_CANDIDATE_DIR")
     harvested: list[str] = []
-    for marker_path in sorted((review_root.parent / "dispatch").glob("*.json")):
+    for marker_path in sorted((city_review / "dispatch").glob("*.json")):
         digest = marker_path.stem
         assignment_path = review_root / f"{digest}.json"
         candidate_path = candidate_root / f"{digest}.json"
@@ -164,7 +170,7 @@ def _harvest_city_candidates(source_key: str | None = None) -> list[str]:
             raw_assignment = assignment_path.read_bytes()
             if hashlib.sha256(raw_assignment).hexdigest() != digest:
                 continue
-            transcript_path = review_root.parent / "transcripts" / f"{digest}.json"
+            transcript_path = city_review / "transcripts" / f"{digest}.json"
             transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else {}
             candidate = _candidate_from_transcript(raw_assignment, transcript)
             if candidate is None:
@@ -349,7 +355,7 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(artifact, dict) or artifact.get("verdict") != "docs-change-required":
         raise ValueError("only docs-change-required candidates may enter direct child dispatch")
     canonical = _assignment_bytes(candidate)
-    marker_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
+    marker_path = _city_review_dir() / "direct-child-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
     if marker_path.exists():
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
         if not isinstance(marker, dict) or marker.get("candidate_digest") != hashlib.sha256(canonical).hexdigest():
@@ -427,7 +433,7 @@ def _dispatch_city(run: dict[str, Any]) -> None:
         "Do not use GitHub credentials, network access, or mutate GitHub.",
     ))
     metadata = json.dumps({"github.docs_review.assignment_sha256": digest, "github.docs_review.candidate_path": str(candidate_path)}, sort_keys=True)
-    request_path = review_root.parent / "requests" / f"{digest}.json"
+    request_path = _city_review_dir() / "requests" / f"{digest}.json"
     request = {"source_key": identity["source_key"], "description": description, "metadata": metadata}
     if request_path.exists() and json.loads(request_path.read_text(encoding="utf-8")) != request:
         raise ValueError("immutable City review request collision")
@@ -554,21 +560,25 @@ def publish_direct_child_results() -> list[str]:
     journey_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"
     pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
     published: list[str] = []
-    for result_path in sorted(outbox.glob("*.json")):
+    for result_path in sorted(outbox.glob("*.json"))[:256]:
         try:
-            payload = json.loads(result_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or set(payload) != {"admission", "update"}:
-                continue
             digest = result_path.stem
             if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
                 continue
+            stat = result_path.lstat()
+            if not result_path.is_file() or result_path.is_symlink() or stat.st_size > 262_144:
+                continue
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or set(payload) != {"candidate_digest", "admission", "update"} or payload.get("candidate_digest") != digest:
+                continue
+            completion_payload = {"admission": payload["admission"], "update": payload["update"]}
             receipt_path = receipt_root / f"{digest}.json"
             if receipt_path.exists():
                 if json.loads(receipt_path.read_text(encoding="utf-8")).get("payload") != payload:
                     continue
                 continue
             completed = subprocess.run(
-                [sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(journey_root), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))],
+                [sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(journey_root), "--input", json.dumps(completion_payload, sort_keys=True, separators=(",", ":"))],
                 capture_output=True, text=True, check=False, timeout=120,
                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
             )
@@ -586,6 +596,40 @@ def publish_direct_child_results() -> list[str]:
             if projected.returncode:
                 continue
             _atomic_write(receipt_path, _assignment_bytes({"payload": payload, "completion": json.loads(completed.stdout), "projection": json.loads(projected.stdout)}))
+            published.append(digest)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return published
+
+
+def publish_legacy_journey_results() -> list[str]:
+    """Compatibility-only App-side projection for persisted legacy children."""
+    outbox = _path_env("GC_GITHUB_DOCS_LEGACY_RESULT_DIR")
+    receipt_root = outbox.parent / "legacy-result-receipts"
+    journey_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"
+    command_script = f"{os.environ.get('GC_GITHUB_PACK_SCRIPTS', '/opt/gascity-packs/github/scripts')}/github_intake_docs_journey_commands.py"
+    published: list[str] = []
+    for path in sorted(outbox.glob("*.json"))[:256]:
+        try:
+            digest = path.stem
+            stat = path.lstat()
+            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest) or not path.is_file() or path.is_symlink() or stat.st_size > 262_144:
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or set(payload) != {"identity", "child_key", "admitted_child", "update"} or not isinstance(payload.get("identity"), str) or not isinstance(payload.get("update"), dict):
+                continue
+            receipt = receipt_root / path.name
+            if receipt.exists():
+                if json.loads(receipt.read_text(encoding="utf-8")).get("payload") != payload:
+                    continue
+                continue
+            recorded = subprocess.run([sys.executable, command_script, "record-child-update", "--once", "--store", str(journey_root), "--input", json.dumps({"identity": payload["identity"], "update": payload["update"]}, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            if recorded.returncode:
+                continue
+            projected = subprocess.run([sys.executable, command_script, "project-until-settled", "--once", "--store", str(journey_root), "--identity", payload["identity"]], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            if projected.returncode:
+                continue
+            _atomic_write(receipt, _assignment_bytes({"payload": payload, "record": json.loads(recorded.stdout), "projection": json.loads(projected.stdout)}))
             published.append(digest)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue
@@ -619,7 +663,8 @@ def reconcile(now: float, source_key: str | None = None) -> dict[str, Any]:
     accepted = candidates(now, source_key)
     reconciler_store: Any = _ScopedDocsReviewStore(store, source_key) if source_key else store
     direct_results = publish_direct_child_results()
-    return {"harvested": harvested, "candidates": accepted, "direct_results": direct_results, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
+    legacy_results = publish_legacy_journey_results()
+    return {"harvested": harvested, "candidates": accepted, "direct_results": direct_results, "legacy_results": legacy_results, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
 
 
 def main() -> int:

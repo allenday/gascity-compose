@@ -81,12 +81,13 @@ class GatewayStoreTests(unittest.TestCase):
         calls: list[bool] = []
         publisher = type(sys)("github_docs_impact_compose_adapter")
         publisher.publish_direct_child_results = lambda: calls.append(True)
+        publisher.publish_legacy_journey_results = lambda: calls.append(True)
 
         with mock.patch.dict(sys.modules, {"github_docs_impact_compose_adapter": publisher}), mock.patch.object(webhook.time, "sleep", side_effect=StopIteration):
             with self.assertRaises(StopIteration):
                 webhook._direct_result_publisher_loop()
 
-        self.assertEqual(calls, [True])
+        self.assertEqual(calls, [True, True])
 
     def test_duplicate_delivery_creates_one_delivery_and_one_intake_job(self) -> None:
         """Catches a replay creating duplicate durable intake work."""

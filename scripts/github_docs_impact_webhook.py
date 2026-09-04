@@ -33,12 +33,13 @@ MAX_PAYLOAD_BYTES = 1_048_576
 
 def _direct_result_publisher_loop() -> None:
     """Publish City outbox records only from the credentialed App service."""
-    from github_docs_impact_compose_adapter import publish_direct_child_results
+    from github_docs_impact_compose_adapter import publish_direct_child_results, publish_legacy_journey_results
 
     interval = max(1.0, float(os.environ.get("GC_GITHUB_DOCS_RECONCILE_SECONDS", "15")))
     while True:
         try:
             publish_direct_child_results()
+            publish_legacy_journey_results()
         except (OSError, ValueError):
             # The durable outbox remains for the next App-side attempt.
             pass

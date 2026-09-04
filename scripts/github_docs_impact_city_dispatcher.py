@@ -343,7 +343,7 @@ def harvest_direct_child_updates() -> list[str]:
             if update is None:
                 continue
             result_path = outbox / marker_path.name
-            payload = {"admission": marker["admission"], "update": update}
+            payload = {"candidate_digest": marker["candidate_digest"], "admission": marker["admission"], "update": update}
             if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
                 continue
             if not result_path.exists():
@@ -525,22 +525,16 @@ def _journey_update_from_bead(bead: dict[str, object]) -> dict[str, object] | No
 
 
 def harvest_journey_updates() -> list[str]:
-    """Record exactly one closed worker result, then re-project its intents.
-
-    The controller remains the only authority that may create the follow-up
-    PR.  This adapter merely moves its final worker evidence across the
-    durable command boundary; it does not touch the original docs-impact
-    Check.
-    """
+    """Write legacy worker evidence to the App-owned compatibility outbox."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
     if not review_dir or not city:
         raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
     target = _journey_target()
     rig = target.partition("/")[0]
-    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
-    command_script = f"{pack_scripts}/github_intake_docs_journey_commands.py"
-    store = str(review_dir / "journeys")
+    outbox = pathlib.Path(os.environ.get("GC_CITY_DOCS_LEGACY_RESULT_OUTBOX", "").strip())
+    if not outbox:
+        raise ValueError("GC_CITY_DOCS_LEGACY_RESULT_OUTBOX is required")
     harvested: list[str] = []
     for marker_path in sorted((review_dir / "journey-dispatch").glob("*.json")):
         marker = _completed_journey_marker(marker_path)
@@ -561,33 +555,13 @@ def harvest_journey_updates() -> list[str]:
             update = _journey_update_from_bead(bead_json)
             if update is None or not _matches_admitted_child(marker["admitted_child"], update):
                 continue
-            record = subprocess.run(
-                [sys.executable, command_script, "record-child-update", "--once", "--store", store,
-                 "--input", json.dumps({"identity": marker["journey_identity"], "update": update}, sort_keys=True, separators=(",", ":"))],
-                capture_output=True, text=True, check=False, timeout=60,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-            if record.returncode:
+            payload = {"identity": marker["journey_identity"], "child_key": marker["child_key"], "admitted_child": marker["admitted_child"], "update": update}
+            result_path = outbox / marker_path.name
+            if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
                 continue
-            recorded = json.loads(record.stdout)
-            journey = recorded.get("journey") if isinstance(recorded, dict) else None
-            child = next((item for item in journey.get("children", []) if isinstance(item, dict) and item.get("key") == marker["child_key"]), None) if isinstance(journey, dict) else None
-            if not isinstance(child, dict) or child.get("state") == "admitted":
-                continue
-            projected = subprocess.run(
-                [sys.executable, command_script, "project-until-settled", "--once", "--store", store,
-                 "--identity", marker["journey_identity"]],
-                capture_output=True, text=True, check=False, timeout=120,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-            if projected.returncode:
-                continue
-            projected_result = json.loads(projected.stdout)
-            projected_journey = projected_result.get("journey") if isinstance(projected_result, dict) else None
-            if not isinstance(projected_journey, dict):
-                continue
-            _terminalize_original_check(marker, projected_journey)
-            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "recorded"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            if not result_path.exists():
+                _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "outboxed"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
             harvested.append(marker_path.stem)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue
