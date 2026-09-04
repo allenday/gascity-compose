@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 import pathlib
@@ -215,7 +216,7 @@ def _installation_token(payload: bytes) -> str:
     return common.create_installation_token(app, str(installation))
 
 
-def _run_adapter(job: Job) -> None:
+def _run_adapter(job: Job) -> dict[str, object]:
     """Run one existing Compose adapter boundary for persisted gateway work."""
     environment = dict(os.environ)
     command = [sys.executable, str(ADAPTER_PATH)]
@@ -238,6 +239,79 @@ def _run_adapter(job: Job) -> None:
             payload_path.unlink(missing_ok=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or f"docs-impact {job.kind} failed")
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"docs-impact {job.kind} returned invalid JSON") from exc
+    if not isinstance(response, dict):
+        raise ValueError(f"docs-impact {job.kind} returned a non-object response")
+    return response
+
+
+def _source_key(payload: bytes) -> str:
+    document = json.loads(payload)
+    repository = document.get("repository") if isinstance(document, dict) else None
+    pull_request = document.get("pull_request") if isinstance(document, dict) else None
+    head = pull_request.get("head") if isinstance(pull_request, dict) else None
+    repository_id = str(repository.get("id") or "") if isinstance(repository, dict) else ""
+    number = pull_request.get("number") if isinstance(pull_request, dict) else None
+    head_sha = str(head.get("sha") or "").lower() if isinstance(head, dict) else ""
+    if not repository_id or type(number) is not int or number <= 0 or not head_sha:
+        raise ValueError("pull_request webhook lacks immutable identity")
+    return f"github-pr:{repository_id}:{number}:{head_sha}"
+
+
+def _matching_marker(directory: pathlib.Path, source_key: str) -> bool:
+    for path in directory.glob("*.json"):
+        try:
+            marker = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(marker, dict) and marker.get("source_key") == source_key and marker.get("dispatched") is True:
+            return True
+    return False
+
+
+def _has_candidate(candidate_root: pathlib.Path, source_key: str) -> bool:
+    for path in candidate_root.glob("*.json"):
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
+            identity = artifact.get("identity") if isinstance(artifact, dict) else None
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(identity, dict) and identity.get("source_key") == source_key:
+            return True
+    return False
+
+
+def _projected(review_root: pathlib.Path, source_key: str) -> bool:
+    path = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+    try:
+        run = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(run, dict)
+        and run.get("identity") == source_key
+        and run.get("state") in {"terminal", "stale", "journey-pending"}
+        and run.get("pending_actions") == []
+    )
+
+
+def _stage_completed(job: Job) -> bool:
+    """Require durable evidence rather than treating one poll as completion."""
+    if job.kind == "intake":
+        return True
+    source_key = _source_key(job.payload)
+    assignment_root = pathlib.Path(os.environ["GC_GITHUB_DOCS_ASSIGNMENT_DIR"])
+    if job.kind == "dispatch":
+        return _matching_marker(assignment_root.parent / "dispatch", source_key)
+    if job.kind == "harvest":
+        return _has_candidate(pathlib.Path(os.environ["GC_GITHUB_DOCS_CANDIDATE_DIR"]), source_key)
+    if job.kind == "project":
+        return _projected(pathlib.Path(os.environ["GC_GITHUB_DOCS_REVIEW_RUNS_DIR"]), source_key)
+    raise ValueError(f"unknown gateway job kind: {job.kind}")
 
 
 def process_one(store: GatewayStore, now: int) -> bool:
@@ -247,6 +321,8 @@ def process_one(store: GatewayStore, now: int) -> bool:
         return False
     try:
         _run_adapter(job)
+        if not _stage_completed(job):
+            raise ValueError(f"durable {job.kind} predicate is not met")
     except Exception as exc:
         store.retry(job.id, job.lease_token, str(exc), now)
         return False

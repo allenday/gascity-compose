@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import os
 import pathlib
 import sqlite3
 import sys
@@ -162,18 +164,101 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 1)
                 self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs").fetchone(), ("pending", 1, None))
 
+    def test_empty_reconciliation_keeps_dispatch_retryable(self) -> None:
+        """Catches a zero-exit polling pass completing City dispatch before it happens."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            payload = json.dumps({"action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": "a" * 40}}}).encode()
+            store.enqueue_delivery("delivery-dispatch-123", "pull_request", payload, 100)
+            review_root = root / "docs-review"
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", return_value={}):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertFalse(gateway.process_one(store, 101))
+
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = 'dispatch'").fetchone(), ("pending", 1, None))
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 0)
+
+    def test_empty_reconciliation_keeps_harvest_and_project_retryable(self) -> None:
+        """Catches later polling stages completing before their durable records exist."""
+        for stage in ("harvest", "project"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temp:
+                root = pathlib.Path(temp)
+                store = gateway.GatewayStore(root)
+                sha = "a" * 40
+                source_key = f"github-pr:17:9:{sha}"
+                payload = json.dumps({"action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": sha}}}).encode()
+                store.enqueue_delivery(f"delivery-{stage}-123", "pull_request", payload, 100)
+                review_root = root / "docs-review"
+                environment = {
+                    "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                    "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                    "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+                }
+                intake = store.claim(100)
+                assert intake is not None
+                self.assertTrue(store.advance(intake.id, intake.lease_token, "dispatch", 100))
+                marker = review_root / "dispatch" / "assignment.json"
+                marker.parent.mkdir(parents=True)
+                marker.write_text(json.dumps({"bead_id": "bead-1", "source_key": source_key, "dispatched": True}))
+                dispatch = store.claim(100)
+                assert dispatch is not None
+                self.assertTrue(store.advance(dispatch.id, dispatch.lease_token, "harvest", 100))
+                if stage == "project":
+                    candidate = review_root / "candidates" / "assignment.json"
+                    candidate.parent.mkdir(parents=True)
+                    candidate.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}))
+                    harvest = store.claim(100)
+                    assert harvest is not None
+                    self.assertTrue(store.advance(harvest.id, harvest.lease_token, "project", 100))
+
+                with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", return_value={}):
+                    self.assertFalse(gateway.process_one(store, 101))
+
+                with sqlite3.connect(root / "gateway.sqlite") as connection:
+                    self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = ?", (stage,)).fetchone(), ("pending", 1, None))
+
     def test_successful_worker_advances_one_persisted_delivery_through_reconciliation(self) -> None:
         """Catches lifecycle stages being skipped or detached from their delivery bytes."""
         with tempfile.TemporaryDirectory() as temp:
-            store = gateway.GatewayStore(pathlib.Path(temp))
-            payload = b'{"installation":{"id":17},"action":"opened"}'
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            sha = "a" * 40
+            source_key = f"github-pr:17:9:{sha}"
+            payload = json.dumps({"installation": {"id": 17}, "action": "opened", "repository": {"id": 17}, "pull_request": {"number": 9, "head": {"sha": sha}}}).encode()
             store.enqueue_delivery("delivery-stages-123", "pull_request", payload, 100)
             seen: list[tuple[str, bytes]] = []
+            review_root = root / "docs-review"
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
 
-            def run_adapter(job: gateway.Job) -> None:
+            def run_adapter(job: gateway.Job) -> dict[str, object]:
                 seen.append((job.kind, job.payload))
+                if job.kind == "dispatch":
+                    marker = review_root / "dispatch" / "assignment.json"
+                    marker.parent.mkdir(parents=True)
+                    marker.write_text(json.dumps({"bead_id": "bead-1", "source_key": source_key, "dispatched": True}))
+                elif job.kind == "harvest":
+                    candidate = review_root / "candidates" / "assignment.json"
+                    candidate.parent.mkdir(parents=True)
+                    candidate.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}))
+                elif job.kind == "project":
+                    run = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+                    run.parent.mkdir(parents=True)
+                    run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": []}))
+                return {}
 
-            with mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
                 for now in range(100, 104):
                     self.assertTrue(gateway.process_one(store, now))
 
