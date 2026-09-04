@@ -316,13 +316,15 @@ def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> 
 
 
 def harvest_direct_child_updates() -> list[str]:
-    """Validate a closed direct worker result before handing it to Pack/App."""
+    """Validate a closed direct worker result into the narrow App outbox."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
     if not review_dir or not city:
         raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
     rig, _ = _direct_child_target()
-    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+    outbox = pathlib.Path(os.environ.get("GC_CITY_DOCS_DIRECT_RESULT_OUTBOX", "").strip())
+    if not outbox:
+        raise ValueError("GC_CITY_DOCS_DIRECT_RESULT_OUTBOX is required")
     handed_off: list[str] = []
     for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
         try:
@@ -340,25 +342,13 @@ def harvest_direct_child_updates() -> list[str]:
             update = _direct_child_update(marker, bead)
             if update is None:
                 continue
-            result_path = review_dir / "direct-child-results" / f"{marker_path.stem}.json"
+            result_path = outbox / marker_path.name
             payload = {"admission": marker["admission"], "update": update}
             if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
                 continue
             if not result_path.exists():
                 _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
-            published = subprocess.run([sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(review_dir / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-            if published.returncode:
-                continue
-            projected = subprocess.run(
-                [sys.executable, f"{pack_scripts}/github_intake_docs_journey_commands.py",
-                 "project-until-settled", "--once", "--store", str(review_dir / "journeys"),
-                 "--identity", marker["admission"]["recursion_identity"]],
-                capture_output=True, text=True, check=False, timeout=120,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-            if projected.returncode:
-                continue
-            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "published"}, sort_keys=True, separators=(",", ":")).encode())
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "outboxed"}, sort_keys=True, separators=(",", ":")).encode())
             handed_off.append(marker_path.stem)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue

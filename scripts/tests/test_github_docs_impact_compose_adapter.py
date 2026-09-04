@@ -329,8 +329,8 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertIn("--all", command.call_args.args[0])
         self.assertIn("--limit", command.call_args.args[0])
 
-    def test_completed_direct_child_is_projected_until_followup_pr_is_settled(self) -> None:
-        """Catches completion being persisted without running the Pack publisher."""
+    def test_completed_direct_child_is_written_to_narrow_outbox_without_pack_publication(self) -> None:
+        """City harvest must not reach Pack/App credentials or publisher state."""
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             marker_path = root / "direct-child-dispatch" / ("d" * 64 + ".json")
@@ -341,21 +341,39 @@ class CandidateBridgeTests(unittest.TestCase):
             marker = {"admission": admission, "direct_child": direct_child, "patch_context": context, "snapshot_sha": SHA, "bead_id": "bead-direct", "dispatched": True}
             marker_path.write_text(json.dumps(marker))
             update = {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": direct_child, "state": "complete", "patch_context": context, "documentation_patch": {"schema_version": 1, "status": "proposed", "generated_at": "2026-09-04T00:00:00Z", "identity": {"head_sha": SHA}, "patch_sha256": "d" * 64, "diff": "diff --git a/docs/guide.md b/docs/guide.md", "files": [{"path": "docs/guide.md", "sha256": "f" * 64}], "claims": [{"claim": "guide", "evidence": "git:" + SHA, "release_scope": "current"}], "checks": [{"command": "git diff --check", "status": "passed", "explanation": "clean"}], "artifact_sha256": "e" * 64}}
-            commands = [
-                mock.Mock(returncode=0, stdout=json.dumps({"status": "closed", "metadata": {"github.docs_direct_child.result": json.dumps(update)}}), stderr=""),
-                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"identity": admission["recursion_identity"]}, "action": {"kind": "create_docs_pr"}}), stderr=""),
-                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
-            ]
-            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
+            commands = [mock.Mock(returncode=0, stdout=json.dumps({"status": "closed", "metadata": {"github.docs_direct_child.result": json.dumps(update)}}), stderr="")]
+            outbox = root / "direct-results"
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "GC_CITY_DOCS_DIRECT_RESULT_OUTBOX": str(outbox), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
                 self.assertEqual(dispatcher.harvest_direct_child_updates(), [marker_path.stem])
 
-            self.assertEqual(command.call_count, 3)
-            self.assertIn("github_intake_docs_direct_child_complete.py", command.call_args_list[1].args[0][1])
-            self.assertIn("github_intake_docs_journey_commands.py", command.call_args_list[2].args[0][1])
-            self.assertIn("project-until-settled", command.call_args_list[2].args[0])
-            self.assertEqual(command.call_args_list[2].args[0][-1], admission["recursion_identity"])
-            self.assertEqual(json.loads(marker_path.read_text())["dispatched"], "published")
+            self.assertEqual(command.call_count, 1)
+            self.assertEqual(json.loads(marker_path.read_text())["dispatched"], "outboxed")
+            self.assertEqual(json.loads((outbox / marker_path.name).read_text()), {"admission": admission, "update": update})
+
+    def test_credentialed_adapter_publishes_city_outbox_result_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            context = patch_context()
+            child = {"key": "github-pr-docs-child:direct"}
+            admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": child, "patch_context": context}
+            update = {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": child, "state": "blocked", "patch_context": context, "documentation_patch": None}
+            outbox = root / "direct-results"
+            outbox.mkdir()
+            (outbox / ("d" * 64 + ".json")).write_text(json.dumps({"admission": admission, "update": update}))
+            commands = [
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"identity": admission["recursion_identity"]}, "action": None}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
+            ]
+            environment = {"GC_GITHUB_DOCS_DIRECT_RESULT_DIR": str(outbox), "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "docs-review" / "assignments"), "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.subprocess, "run", side_effect=commands) as command:
+                self.assertEqual(adapter.publish_direct_child_results(), [("d" * 64)])
+                self.assertEqual(adapter.publish_direct_child_results(), [])
+
+            self.assertEqual(command.call_count, 2)
+            self.assertIn("github_intake_docs_direct_child_complete.py", command.call_args_list[0].args[0][1])
+            self.assertIn("project-until-settled", command.call_args_list[1].args[0])
+            self.assertTrue((root / "direct-result-receipts" / ("d" * 64 + ".json")).is_file())
 
     def test_legacy_journey_marker_uses_legacy_agent_in_direct_child_rig(self) -> None:
         """Catches stored legacy work being sent to the incompatible direct agent."""

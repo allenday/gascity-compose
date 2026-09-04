@@ -542,6 +542,56 @@ def candidates(now: float, source_key: str | None = None) -> list[dict[str, Any]
     return result
 
 
+def publish_direct_child_results() -> list[str]:
+    """Let the credentialed App service complete City-produced patch results.
+
+    The City owns only the credential-free Bead harvest and an append-only
+    result outbox. Pack completion, GitHub App authentication, branch push,
+    and PR projection all remain in this service.
+    """
+    outbox = _path_env("GC_GITHUB_DOCS_DIRECT_RESULT_DIR")
+    receipt_root = outbox.parent / "direct-result-receipts"
+    journey_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"
+    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+    published: list[str] = []
+    for result_path in sorted(outbox.glob("*.json")):
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or set(payload) != {"admission", "update"}:
+                continue
+            digest = result_path.stem
+            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                continue
+            receipt_path = receipt_root / f"{digest}.json"
+            if receipt_path.exists():
+                if json.loads(receipt_path.read_text(encoding="utf-8")).get("payload") != payload:
+                    continue
+                continue
+            completed = subprocess.run(
+                [sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(journey_root), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if completed.returncode:
+                continue
+            admission = payload["admission"]
+            identity = admission.get("recursion_identity") if isinstance(admission, dict) else None
+            if not isinstance(identity, str) or not identity:
+                continue
+            projected = subprocess.run(
+                [sys.executable, f"{pack_scripts}/github_intake_docs_journey_commands.py", "project-until-settled", "--once", "--store", str(journey_root), "--identity", identity],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if projected.returncode:
+                continue
+            _atomic_write(receipt_path, _assignment_bytes({"payload": payload, "completion": json.loads(completed.stdout), "projection": json.loads(projected.stdout)}))
+            published.append(digest)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return published
+
+
 class _ScopedDocsReviewStore:
     """Expose one immutable run to the generic reconciler.
 
@@ -568,7 +618,8 @@ def reconcile(now: float, source_key: str | None = None) -> dict[str, Any]:
     harvested = _harvest_city_candidates(source_key)
     accepted = candidates(now, source_key)
     reconciler_store: Any = _ScopedDocsReviewStore(store, source_key) if source_key else store
-    return {"harvested": harvested, "candidates": accepted, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
+    direct_results = publish_direct_child_results()
+    return {"harvested": harvested, "candidates": accepted, "direct_results": direct_results, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
 
 
 def main() -> int:

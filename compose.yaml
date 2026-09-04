@@ -78,7 +78,10 @@ services:
       # The App stages an exact-SHA source checkout here. City sees it only
       # through its separate read-only intake-state mount below.
       GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots
-      GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-intake/direct-snapshots
+      GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-docs-impact/snapshots
+      # City can append worker results here, but App publication is performed
+      # only by this credentialed webhook service.
+      GC_GITHUB_DOCS_DIRECT_RESULT_DIR: /var/lib/github-intake/direct-results
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
@@ -159,9 +162,9 @@ services:
       GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
       GC_CITY_DOCS_DIRECT_CHILD_TARGET: ${GC_CITY_DOCS_DIRECT_CHILD_TARGET:-gascity/github-docs-impact.docs-recursion-direct-child}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
-      GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-intake/direct-snapshots
+      GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-docs-impact/snapshots
+      GC_CITY_DOCS_DIRECT_RESULT_OUTBOX: /var/lib/github-docs-impact/direct-results
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
-      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
       DOLT_USER_EMAIL: ${DOLT_USER_EMAIL:-allenday@allenday.com}
@@ -176,7 +179,8 @@ services:
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
       - ./state/github-intake/docs-review:/var/lib/github-docs-impact/review
-      - ./state/github-intake:/var/lib/github-intake:ro
+      - ./state/github-intake/direct-snapshots:/var/lib/github-docs-impact/snapshots:ro
+      - ./state/github-intake/direct-results:/var/lib/github-docs-impact/direct-results
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,

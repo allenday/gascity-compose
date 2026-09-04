@@ -59,13 +59,17 @@ flowchart LR
   RV -->|safe docs change required| SS[Trusted App stages read-only\nexact-SHA source snapshot]
   SS --> DW[Credential-free City docs worker]
   DW --> PA[Bounded content-addressed\ndocumentation patch artifact]
-  PA --> BOT[Trusted GitHub App validates, applies,\ncommits, pushes, and opens one follow-up PR]
+  PA --> OB[Narrow durable result outbox]
+  OB --> BOT[Credentialed GitHub App validates, applies,\ncommits, pushes, and opens one follow-up PR]
   BOT --> MERGE[Human reviews and merges follow-up]
   MERGE --> RECHECK[GitHub sends a new source revision]
   RECHECK --> GW
 ```
 
-The direct worker receives the snapshot descriptor and no GitHub credential.
+The City receives only the snapshot mount and a narrow writable result outbox;
+it does not mount GitHub App configuration, the complete intake state, or the
+Pack journey store. The direct worker receives the snapshot descriptor and no
+GitHub credential.
 It can make disposable local edits to derive a Git patch, but it never claims
 a remote branch or commit. The App-side Pack boundary validates the complete
 artifact against the staged reviewed SHA before it is allowed to publish the
