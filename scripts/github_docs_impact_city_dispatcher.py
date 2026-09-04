@@ -62,6 +62,14 @@ def _reviewer_target() -> tuple[str, str]:
     return rig, target
 
 
+def _direct_child_target() -> tuple[str, str]:
+    target = os.environ.get("GC_CITY_DOCS_DIRECT_CHILD_TARGET", "").strip()
+    rig, separator, agent = target.partition("/")
+    if not rig or not separator or not agent:
+        raise ValueError("GC_CITY_DOCS_DIRECT_CHILD_TARGET must be a qualified <rig>/<agent> name")
+    return rig, target
+
+
 def _source_scope(source_key: str) -> tuple[str, str, str] | None:
     """Return the immutable PR lineage portion of a GitHub source key."""
     parts = source_key.split(":")
@@ -183,33 +191,63 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
     return marker
 
 
+def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> str | None:
+    """Find the City Bead created before a crash could record its ID."""
+    result = subprocess.run(
+        ["gc", "--city", city, "--rig", rig, "bd", "list", "--label", "github-docs-impact", "--json"],
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    if result.returncode:
+        return None
+    try:
+        values = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(values, list):
+        return None
+    expected = marker.get("direct_child")
+    for value in values:
+        metadata = value.get("metadata") if isinstance(value, dict) else None
+        recorded = metadata.get("github.docs_direct_child") if isinstance(metadata, dict) else None
+        try:
+            recorded = json.loads(recorded) if isinstance(recorded, str) else recorded
+        except json.JSONDecodeError:
+            continue
+        bead_id = value.get("id") if isinstance(value, dict) else None
+        if recorded == expected and isinstance(bead_id, str) and bead_id:
+            return bead_id
+    return None
+
+
 def dispatch_direct_child_pending() -> list[str]:
     """Sling exactly the child already durably admitted for a PR revision."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
     if not review_dir or not city:
         raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
-    rig, target = _reviewer_target()
+    rig, target = _direct_child_target()
     dispatched: list[str] = []
     for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
         marker = _pending_direct_child_marker(marker_path)
         if marker is None:
             continue
         if marker["bead_id"] is None:
-            metadata = json.dumps({"github.docs_direct_child": marker["direct_child"]}, sort_keys=True, separators=(",", ":"))
-            created = subprocess.run(
-                ["gc", "--city", city, "--rig", rig, "bd", "create", "Implement direct docs child", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", json.dumps(marker, sort_keys=True), "--json"],
-                capture_output=True, text=True, check=False, timeout=45,
-            )
-            if created.returncode:
-                continue
-            try:
-                response = json.loads(created.stdout)
-                if isinstance(response, list) and len(response) == 1:
-                    response = response[0]
-                bead_id = response.get("id") if isinstance(response, dict) else None
-            except json.JSONDecodeError:
-                continue
+            bead_id = _adopt_direct_child_bead(city, rig, marker)
+            if bead_id is None:
+                metadata = json.dumps({"github.docs_direct_child": marker["direct_child"]}, sort_keys=True, separators=(",", ":"))
+                created = subprocess.run(
+                    ["gc", "--city", city, "--rig", rig, "bd", "create", "Implement direct docs child", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", json.dumps(marker, sort_keys=True), "--json"],
+                    capture_output=True, text=True, check=False, timeout=45,
+                )
+                if created.returncode:
+                    continue
+                try:
+                    response = json.loads(created.stdout)
+                    if isinstance(response, list) and len(response) == 1:
+                        response = response[0]
+                    bead_id = response.get("id") if isinstance(response, dict) else None
+                except json.JSONDecodeError:
+                    continue
             if not isinstance(bead_id, str) or not bead_id:
                 continue
             marker = {**marker, "bead_id": bead_id}
@@ -223,6 +261,64 @@ def dispatch_direct_child_pending() -> list[str]:
         _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         dispatched.append(marker_path.stem)
     return dispatched
+
+
+def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> dict[str, object] | None:
+    metadata = bead.get("metadata")
+    value = metadata.get("github.docs_direct_child.result") if isinstance(metadata, dict) else None
+    try:
+        update = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(update, dict) or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-child-update":
+        return None
+    if update.get("admitted_child") != marker.get("direct_child") or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}:
+        return None
+    branch = update.get("documentation_branch")
+    if branch is not None and (not isinstance(branch, dict) or set(branch) != {"branch", "commit_sha", "evidence"}):
+        return None
+    return update
+
+
+def harvest_direct_child_updates() -> list[str]:
+    """Validate a closed direct worker result before handing it to Pack/App."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, _ = _direct_child_target()
+    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+    handed_off: list[str] = []
+    for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            if not isinstance(marker, dict) or marker.get("dispatched") is not True or not isinstance(marker.get("bead_id"), str):
+                continue
+            bead_result = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
+            if bead_result.returncode:
+                continue
+            bead = json.loads(bead_result.stdout)
+            if isinstance(bead, list) and len(bead) == 1:
+                bead = bead[0]
+            if not isinstance(bead, dict) or bead.get("status") != "closed":
+                continue
+            update = _direct_child_update(marker, bead)
+            if update is None:
+                continue
+            result_path = review_dir / "direct-child-results" / f"{marker_path.stem}.json"
+            payload = {"direct_child": marker["direct_child"], "result": update}
+            if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
+                continue
+            if not result_path.exists():
+                _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+            published = subprocess.run([sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            if published.returncode:
+                continue
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "published"}, sort_keys=True, separators=(",", ":")).encode())
+            handed_off.append(marker_path.stem)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return handed_off
 
 
 def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
@@ -245,11 +341,8 @@ def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
 
 
 def _journey_target() -> str:
-    target = os.environ.get("GC_CITY_DOCS_JOURNEY_TARGET", "").strip()
-    rig, separator, agent = target.partition("/")
-    if not rig or not separator or not agent:
-        raise ValueError("GC_CITY_DOCS_JOURNEY_TARGET must be a qualified <rig>/<agent> name")
-    return target
+    """Adopt persisted legacy work through the current direct-child worker."""
+    return _direct_child_target()[1]
 
 
 def dispatch_journey_pending() -> list[str]:
@@ -685,7 +778,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "direct_children": dispatch_direct_child_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "direct_children": dispatch_direct_child_pending(), "direct_results": harvest_direct_child_updates(), "legacy_journeys": dispatch_journey_pending(), "legacy_updates": harvest_journey_updates(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

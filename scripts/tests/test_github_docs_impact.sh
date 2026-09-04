@@ -27,6 +27,11 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 # inputs, so interpolation failures are caught before GitHub Actions runs.
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
+require 'GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact\.docs-journey' "$ci_workflow"
+if grep -Rqs 'GC_CITY_DOCS_JOURNEY_TARGET' "$root/.github" "$root/compose.yaml" "$root/.env.example" "$root/scripts/github-docs-impact-preflight.sh"; then
+  echo 'retired journey target must not remain in CI or preflight configuration' >&2
+  exit 1
+fi
 require 'github-webhook:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
@@ -91,6 +96,7 @@ forbid_city() {
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
+require_city 'GC_CITY_DOCS_DIRECT_CHILD_TARGET:.*GC_CITY_DOCS_DIRECT_CHILD_TARGET'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 # City runs as HOST_UID:GID, so its supervisor state and real home must not

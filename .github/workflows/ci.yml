@@ -23,7 +23,7 @@ jobs:
           CITY_NAME: ci-city
           GC_CITY_DOCS_REVIEW_RIG_DIR: ${{ github.workspace }}/fixture-my-project
           GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact.docs-impact-reviewer
-          GC_CITY_DOCS_JOURNEY_TARGET: my-project/github-docs-impact.docs-journey
+          GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact.docs-journey
           CITY_MAIL_LAUNCHER_RIG: my-project
           TAILNET_IP: 100.64.0.1
           STACK_USERNAME: ci-admin
