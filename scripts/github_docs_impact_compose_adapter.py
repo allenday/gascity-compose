@@ -387,7 +387,14 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child", "patch_context"}:
         raise ValueError("direct child admission returned an invalid record")
     snapshot = _stage_direct_snapshot(request, installation_id)
-    marker = {**request, "snapshot": snapshot, "admission": admission, "direct_child": admission["admitted_child"], "patch_context": admission["patch_context"], "bead_id": None, "dispatched": False}
+    handoff_id = hashlib.sha256(_assignment_bytes({"request": request, "admission": admission})).hexdigest()
+    receipt_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-handoffs" / f"{handoff_id}.json"
+    receipt = {"handoff_id": handoff_id, "candidate_digest": request["candidate_digest"], "admission": admission, "consumed": False}
+    if receipt_path.exists() and json.loads(receipt_path.read_text(encoding="utf-8")) != receipt:
+        raise ValueError("direct handoff receipt collision")
+    if not receipt_path.exists():
+        _atomic_write(receipt_path, _assignment_bytes(receipt))
+    marker = {"schema_version": 1, "kind": "github-pr-docs-direct-child", "handoff_id": handoff_id, "snapshot": snapshot, "direct_child": admission["admitted_child"], "patch_context": admission["patch_context"], "bead_id": None, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
 
@@ -569,9 +576,15 @@ def publish_direct_child_results() -> list[str]:
             if not result_path.is_file() or result_path.is_symlink() or stat.st_size > 262_144:
                 continue
             payload = json.loads(result_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or set(payload) != {"candidate_digest", "admission", "update"} or payload.get("candidate_digest") != digest:
+            if not isinstance(payload, dict) or set(payload) != {"handoff_id", "update"} or payload.get("handoff_id") != digest:
                 continue
-            completion_payload = {"admission": payload["admission"], "update": payload["update"]}
+            handoff = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-handoffs" / f"{digest}.json"
+            if not handoff.is_file() or handoff.is_symlink() or handoff.lstat().st_size > 262_144:
+                continue
+            receipt = json.loads(handoff.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict) or set(receipt) != {"handoff_id", "candidate_digest", "admission", "consumed"} or receipt.get("handoff_id") != digest or receipt.get("consumed") is not False:
+                continue
+            completion_payload = {"admission": receipt["admission"], "update": payload["update"]}
             receipt_path = receipt_root / f"{digest}.json"
             if receipt_path.exists():
                 if json.loads(receipt_path.read_text(encoding="utf-8")).get("payload") != payload:
@@ -596,6 +609,7 @@ def publish_direct_child_results() -> list[str]:
             if projected.returncode:
                 continue
             _atomic_write(receipt_path, _assignment_bytes({"payload": payload, "completion": json.loads(completed.stdout), "projection": json.loads(projected.stdout)}))
+            _atomic_write(handoff, _assignment_bytes({**receipt, "consumed": True}))
             published.append(digest)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue

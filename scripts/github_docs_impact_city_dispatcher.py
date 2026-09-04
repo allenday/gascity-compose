@@ -168,38 +168,30 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
         marker = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         return None
-    required = {
-        "schema_version", "kind", "candidate_digest", "repository_id", "repository", "pr_number",
-        "source_key", "snapshot_sha", "source_branch", "candidate_identity", "coverage_cells",
-        "execution_budgets", "snapshot", "admission", "direct_child", "patch_context", "bead_id", "dispatched",
-    }
+    required = {"schema_version", "kind", "handoff_id", "snapshot", "direct_child", "patch_context", "bead_id", "dispatched"}
     if not isinstance(marker, dict) or set(marker) != required or marker.get("schema_version") != 1:
         return None
     if marker.get("kind") != "github-pr-docs-direct-child" or marker.get("dispatched") is not False:
         return None
-    if not all(isinstance(marker.get(key), str) and marker[key] for key in ("candidate_digest", "source_key", "snapshot_sha", "source_branch")):
+    if not isinstance(marker.get("handoff_id"), str) or len(marker["handoff_id"]) != 64:
         return None
     if marker.get("bead_id") is not None and (not isinstance(marker.get("bead_id"), str) or not marker["bead_id"]):
         return None
-    if type(marker.get("pr_number")) is not int or not isinstance(marker.get("coverage_cells"), list) or not marker["coverage_cells"]:
-        return None
-    budgets, child, snapshot, patch_context = marker.get("execution_budgets"), marker.get("direct_child"), marker.get("snapshot"), marker.get("patch_context")
-    if not isinstance(budgets, dict) or budgets.get("max_children") != 1 or budgets.get("max_docs_prs") != 1:
-        return None
-    if not isinstance(child, dict) or not isinstance(marker.get("admission"), dict):
+    child, snapshot, patch_context = marker.get("direct_child"), marker.get("snapshot"), marker.get("patch_context")
+    if not isinstance(child, dict):
         return None
     if (not isinstance(patch_context, dict)
             or set(patch_context) != {"schema_version", "kind", "proposal_identity"}
             or patch_context.get("schema_version") != 1
             or patch_context.get("kind") != "github-docs-recursion-direct-patch-context"
             or not isinstance(patch_context.get("proposal_identity"), dict)
-            or marker["admission"].get("patch_context") != patch_context):
+            ):
         return None
     snapshot_fields = {"schema_version", "kind", "head_sha", "tree_sha", "path"}
     snapshot_root = os.environ.get("GC_CITY_DOCS_SNAPSHOT_ROOT", "/var/lib/github-intake/direct-snapshots").rstrip("/")
     if (not isinstance(snapshot, dict) or set(snapshot) != snapshot_fields
             or snapshot.get("schema_version") != 1 or snapshot.get("kind") != "github-pr-source-snapshot"
-            or snapshot.get("head_sha") != marker.get("snapshot_sha")
+            or not isinstance(snapshot.get("head_sha"), str)
             or not isinstance(snapshot.get("tree_sha"), str) or len(snapshot["tree_sha"]) != 40
             or any(char not in "0123456789abcdef" for char in snapshot["tree_sha"].lower())
             or not isinstance(snapshot.get("path"), str) or not snapshot["path"].startswith(snapshot_root + "/")):
@@ -308,7 +300,7 @@ def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> 
     if patch is not None and (not isinstance(patch, dict) or set(patch) != patch_fields
                               or patch.get("schema_version") != 1 or patch.get("status") != "proposed"
                               or not isinstance(patch.get("identity"), dict)
-                              or patch["identity"].get("head_sha") != marker.get("snapshot_sha")
+                              or patch["identity"].get("head_sha") != (marker.get("snapshot") or {}).get("head_sha")
                               or not isinstance(patch.get("patch_sha256"), str) or len(patch["patch_sha256"]) != 64
                               or not isinstance(patch.get("artifact_sha256"), str) or len(patch["artifact_sha256"]) != 64):
         return None
@@ -342,8 +334,8 @@ def harvest_direct_child_updates() -> list[str]:
             update = _direct_child_update(marker, bead)
             if update is None:
                 continue
-            result_path = outbox / marker_path.name
-            payload = {"candidate_digest": marker["candidate_digest"], "admission": marker["admission"], "update": update}
+            result_path = outbox / f"{marker['handoff_id']}.json"
+            payload = {"handoff_id": marker["handoff_id"], "update": update}
             if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
                 continue
             if not result_path.exists():
