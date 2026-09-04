@@ -358,7 +358,7 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     marker_path = _city_review_dir() / "direct-child-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
     if marker_path.exists():
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
-        if not isinstance(marker, dict) or marker.get("candidate_digest") != hashlib.sha256(canonical).hexdigest():
+        if not isinstance(marker, dict) or not isinstance(marker.get("handoff_id"), str):
             raise ValueError("invalid durable direct child marker")
         return marker
     assignment_identity = artifact.get("identity")
@@ -597,7 +597,7 @@ def publish_direct_child_results() -> list[str]:
             )
             if completed.returncode:
                 continue
-            admission = payload["admission"]
+            admission = receipt["admission"]
             identity = admission.get("recursion_identity") if isinstance(admission, dict) else None
             if not isinstance(identity, str) or not identity:
                 continue

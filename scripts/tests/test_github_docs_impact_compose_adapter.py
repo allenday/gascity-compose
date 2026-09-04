@@ -138,13 +138,11 @@ class CandidateBridgeTests(unittest.TestCase):
             marker = adapter._persist_direct_child(candidate)
 
         self.assertEqual(marker["kind"], "github-pr-docs-direct-child")
-        self.assertEqual(marker["source_key"], assignment()["identity"]["source_key"])
-        self.assertEqual(marker["snapshot_sha"], SHA)
-        self.assertEqual(marker["coverage_cells"], candidate["coverage_cells"])
+        self.assertEqual(len(marker["handoff_id"]), 64)
+        self.assertEqual(marker["snapshot"]["head_sha"], SHA)
         self.assertEqual(marker["snapshot"], snapshot)
         self.assertEqual(marker["patch_context"], admission["patch_context"])
         stage.assert_called_once()
-        self.assertEqual(marker["execution_budgets"]["max_children"], 1)
         self.assertFalse(marker["dispatched"])
         self.assertIn("github_intake_docs_direct_child_admit.py", command.call_args.args[0][1])
         admission_payload = json.loads(command.call_args.args[0][command.call_args.args[0].index("--input") + 1])
@@ -299,9 +297,8 @@ class CandidateBridgeTests(unittest.TestCase):
             marker.parent.mkdir()
             direct_child = {"key": "github-pr-docs-child:" + "d" * 64, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "coverage_cells": [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}], "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3}}
             patch = patch_context()
-            admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": direct_child, "patch_context": patch}
             snapshot = {"schema_version": 1, "kind": "github-pr-source-snapshot", "head_sha": SHA, "tree_sha": "c" * 40, "path": "/var/lib/github-intake/direct-snapshots/snapshot"}
-            marker.write_text(json.dumps({"schema_version": 1, "kind": "github-pr-docs-direct-child", "candidate_digest": "d" * 64, "repository_id": "17", "repository": "example/docs", "pr_number": 9, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "source_branch": "feature/docs", "candidate_identity": assignment()["identity"], "coverage_cells": direct_child["coverage_cells"], "execution_budgets": direct_child["execution_budgets"], "snapshot": snapshot, "admission": admission, "direct_child": direct_child, "patch_context": patch, "bead_id": None, "dispatched": False}))
+            marker.write_text(json.dumps({"schema_version": 1, "kind": "github-pr-docs-direct-child", "handoff_id": "d" * 64, "snapshot": snapshot, "direct_child": direct_child, "patch_context": patch, "bead_id": None, "dispatched": False}))
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child"}
             commands = [mock.Mock(returncode=0, stdout=json.dumps([{"id": "bead-direct", "metadata": {"github.docs_direct_child": direct_child, "github.docs_direct_child.snapshot": snapshot, "github.docs_direct_child.patch_context": patch}}]), stderr=""), mock.Mock(returncode=0, stdout="{}", stderr="")]
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
@@ -315,7 +312,7 @@ class CandidateBridgeTests(unittest.TestCase):
         patch = {"schema_version": 1, "status": "proposed", "generated_at": "2026-09-04T00:00:00Z", "identity": {"head_sha": SHA}, "patch_sha256": "d" * 64, "diff": "diff --git a/docs/guide.md b/docs/guide.md", "files": [{"path": "docs/guide.md", "sha256": "f" * 64}], "claims": [{"claim": "guide", "evidence": "git:" + SHA, "release_scope": "current"}], "checks": [{"command": "git diff --check", "status": "passed", "explanation": "clean"}], "artifact_sha256": "e" * 64}
 
         context = patch_context()
-        accepted = dispatcher._direct_child_update({"direct_child": child, "snapshot_sha": SHA, "patch_context": context}, {"metadata": {"github.docs_direct_child.result": {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": child, "state": "complete", "patch_context": context, "documentation_patch": patch}}})
+        accepted = dispatcher._direct_child_update({"direct_child": child, "snapshot": {"head_sha": SHA}, "patch_context": context}, {"metadata": {"github.docs_direct_child.result": {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": child, "state": "complete", "patch_context": context, "documentation_patch": patch}}})
         rejected = dispatcher._direct_child_update({"direct_child": child, "snapshot_sha": SHA, "patch_context": context}, {"metadata": {"github.docs_direct_child.result": {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": child, "state": "complete", "patch_context": {"schema_version": 1}, "documentation_patch": patch}}})
 
         self.assertEqual(accepted["documentation_patch"], patch)
@@ -339,7 +336,7 @@ class CandidateBridgeTests(unittest.TestCase):
             direct_child = {"key": "github-pr-docs-child:" + "d" * 64}
             context = patch_context()
             admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": direct_child, "patch_context": context}
-            marker = {"candidate_digest": marker_path.stem, "admission": admission, "direct_child": direct_child, "patch_context": context, "snapshot_sha": SHA, "bead_id": "bead-direct", "dispatched": True}
+            marker = {"handoff_id": marker_path.stem, "admission": admission, "direct_child": direct_child, "patch_context": context, "snapshot": {"head_sha": SHA}, "bead_id": "bead-direct", "dispatched": True}
             marker_path.write_text(json.dumps(marker))
             update = {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": direct_child, "state": "complete", "patch_context": context, "documentation_patch": {"schema_version": 1, "status": "proposed", "generated_at": "2026-09-04T00:00:00Z", "identity": {"head_sha": SHA}, "patch_sha256": "d" * 64, "diff": "diff --git a/docs/guide.md b/docs/guide.md", "files": [{"path": "docs/guide.md", "sha256": "f" * 64}], "claims": [{"claim": "guide", "evidence": "git:" + SHA, "release_scope": "current"}], "checks": [{"command": "git diff --check", "status": "passed", "explanation": "clean"}], "artifact_sha256": "e" * 64}}
             commands = [mock.Mock(returncode=0, stdout=json.dumps({"status": "closed", "metadata": {"github.docs_direct_child.result": json.dumps(update)}}), stderr="")]
@@ -350,7 +347,7 @@ class CandidateBridgeTests(unittest.TestCase):
 
             self.assertEqual(command.call_count, 1)
             self.assertEqual(json.loads(marker_path.read_text())["dispatched"], "outboxed")
-            self.assertEqual(json.loads((outbox / marker_path.name).read_text()), {"candidate_digest": marker_path.stem, "admission": admission, "update": update})
+            self.assertEqual(json.loads((outbox / marker_path.name).read_text()), {"handoff_id": marker_path.stem, "update": update})
 
     def test_credentialed_adapter_publishes_city_outbox_result_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -361,7 +358,10 @@ class CandidateBridgeTests(unittest.TestCase):
             update = {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": child, "state": "blocked", "patch_context": context, "documentation_patch": None}
             outbox = root / "direct-results"
             outbox.mkdir()
-            (outbox / ("d" * 64 + ".json")).write_text(json.dumps({"candidate_digest": "d" * 64, "admission": admission, "update": update}))
+            handoffs = root / "docs-review" / "direct-handoffs"
+            handoffs.mkdir(parents=True)
+            (handoffs / ("d" * 64 + ".json")).write_text(json.dumps({"handoff_id": "d" * 64, "candidate_digest": "c" * 64, "admission": admission, "consumed": False}))
+            (outbox / ("d" * 64 + ".json")).write_text(json.dumps({"handoff_id": "d" * 64, "update": update}))
             commands = [
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"identity": admission["recursion_identity"]}, "action": None}), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
