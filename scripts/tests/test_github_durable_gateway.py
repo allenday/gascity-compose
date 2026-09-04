@@ -344,6 +344,15 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 1)
                 self.assertEqual(connection.execute("SELECT status, attempts, available_at, lease_until FROM jobs").fetchone(), ("pending", 1, 152, None))
 
+    def test_adapter_process_has_a_bounded_timeout(self) -> None:
+        """A hung GitHub reconciliation cannot monopolize the sole gateway worker."""
+        job = gateway.Job(1, "delivery-timeout", "pull_request", _valid_payload(), "dispatch", 0, 0, 1)
+        completed = mock.Mock(returncode=0, stdout="{}", stderr="")
+        with mock.patch.object(gateway.subprocess, "run", return_value=completed) as command:
+            gateway._run_adapter(job)
+
+        self.assertGreater(command.call_args.kwargs["timeout"], 0)
+
     def test_empty_reconciliation_keeps_dispatch_retryable(self) -> None:
         """Catches a zero-exit polling pass completing City dispatch before it happens."""
         with tempfile.TemporaryDirectory() as temp:
@@ -365,6 +374,26 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             with sqlite3.connect(root / "gateway.sqlite") as connection:
                 self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = 'dispatch'").fetchone(), ("pending", 1, None))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 0)
+
+    def test_new_intake_preempts_a_retrying_reconciliation_job(self) -> None:
+        """A fresh PR revision must not wait behind an older stalled reconcile."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            older = _valid_payload(sha="a" * 40)
+            newer = _valid_payload(sha="b" * 40)
+            store.enqueue_delivery("delivery-older", "pull_request", older, 100)
+            first = store.claim(100)
+            assert first is not None
+            self.assertTrue(store.advance(first.id, first.lease_token, "dispatch", 100))
+            dispatch = store.claim(100)
+            assert dispatch is not None
+            self.assertTrue(store.retry(dispatch.id, dispatch.lease_token, "City reconciliation is pending", 100))
+            store.enqueue_delivery("delivery-newer", "pull_request", newer, 101)
+
+            claimed = store.claim(102)
+
+            assert claimed is not None
+            self.assertEqual((claimed.delivery_id, claimed.kind), ("delivery-newer", "intake"))
 
     def test_empty_reconciliation_keeps_harvest_and_project_retryable(self) -> None:
         """Catches later polling stages completing before their durable records exist."""

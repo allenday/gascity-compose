@@ -22,6 +22,7 @@ from contextlib import closing
 LEASE_SECONDS = 30
 MAX_RETRY_SECONDS = 300
 WORKER_STALL_SECONDS = 600
+ADAPTER_TIMEOUT_SECONDS = 60
 ADAPTER_PATH = pathlib.Path(__file__).with_name("github_docs_impact_compose_adapter.py")
 NEXT_JOB_KIND = {"intake": "dispatch", "dispatch": "harvest", "harvest": "project", "project": None}
 PULL_REQUEST_ACTIONS = {"opened", "reopened", "synchronize", "ready_for_review"}
@@ -434,7 +435,14 @@ def _run_adapter(job: Job) -> dict[str, object]:
     else:
         raise ValueError(f"unknown gateway job kind: {job.kind}")
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False, env=environment)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+            timeout=ADAPTER_TIMEOUT_SECONDS,
+        )
     finally:
         if payload_path is not None:
             payload_path.unlink(missing_ok=True)
