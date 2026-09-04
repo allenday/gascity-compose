@@ -22,6 +22,7 @@ class Job:
     kind: str
     attempts: int
     lease_until: int
+    lease_token: int
 
 
 class GatewayStore:
@@ -61,12 +62,16 @@ class GatewayStore:
                     attempts INTEGER NOT NULL DEFAULT 0,
                     available_at INTEGER NOT NULL,
                     lease_until INTEGER,
+                    lease_token INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
                     completed_at INTEGER,
                     UNIQUE(delivery_id, kind)
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+            if "lease_token" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0")
             connection.execute("CREATE INDEX IF NOT EXISTS jobs_runnable ON jobs(status, available_at, lease_until)")
 
     def enqueue_delivery(self, delivery_id: str, event: str, payload: bytes, now: int) -> bool:
@@ -97,7 +102,7 @@ class GatewayStore:
                 row = connection.execute(
                     """
                     SELECT jobs.id, jobs.delivery_id, deliveries.event, deliveries.payload,
-                           jobs.kind, jobs.attempts
+                           jobs.kind, jobs.attempts, jobs.lease_token
                     FROM jobs JOIN deliveries USING (delivery_id)
                     WHERE jobs.status != 'complete'
                       AND jobs.available_at <= ?
@@ -112,16 +117,16 @@ class GatewayStore:
                     return None
                 lease_until = now + LEASE_SECONDS
                 connection.execute(
-                    "UPDATE jobs SET status = 'leased', lease_until = ? WHERE id = ?",
+                    "UPDATE jobs SET status = 'leased', lease_until = ?, lease_token = lease_token + 1 WHERE id = ?",
                     (lease_until, row[0]),
                 )
                 connection.execute("COMMIT")
-                return Job(*row, lease_until)
+                return Job(*row[:-1], lease_until, int(row[-1]) + 1)
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
 
-    def retry(self, job_id: int, error: str, now: int) -> None:
+    def retry(self, job_id: int, lease_token: int, error: str, now: int) -> bool:
         """Release a failed job after bounded exponential backoff."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -130,28 +135,31 @@ class GatewayStore:
                 if row is not None:
                     attempts = int(row[0]) + 1
                     delay = min(2**attempts, MAX_RETRY_SECONDS)
-                    connection.execute(
+                    changed = connection.execute(
                         """
                         UPDATE jobs
                         SET status = 'pending', attempts = ?, available_at = ?, lease_until = NULL, last_error = ?
-                        WHERE id = ? AND status != 'complete'
+                        WHERE id = ? AND status = 'leased' AND lease_token = ?
                         """,
-                        (attempts, now + delay, error, job_id),
-                    )
+                        (attempts, now + delay, error, job_id, lease_token),
+                    ).rowcount == 1
+                else:
+                    changed = False
                 connection.execute("COMMIT")
+                return changed
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
 
-    def complete(self, job_id: int) -> None:
+    def complete(self, job_id: int, lease_token: int) -> bool:
         """Mark successfully processed work terminal so it cannot be reclaimed."""
         with self._connect() as connection:
-            connection.execute(
+            return connection.execute(
                 """
                 UPDATE jobs
                 SET status = 'complete', lease_until = NULL,
                     completed_at = CAST(strftime('%s', 'now') AS INTEGER)
-                WHERE id = ?
+                WHERE id = ? AND status = 'leased' AND lease_token = ?
                 """,
-                (job_id,),
-            )
+                (job_id, lease_token),
+            ).rowcount == 1

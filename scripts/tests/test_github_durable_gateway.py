@@ -56,7 +56,7 @@ class GatewayStoreTests(unittest.TestCase):
                 job = store.claim(now)
                 self.assertIsNotNone(job)
                 assert job is not None
-                store.retry(job.id, "city unavailable", now)
+                self.assertTrue(store.retry(job.id, job.lease_token, "city unavailable", now))
                 delay = min(2 ** (attempt + 1), gateway.MAX_RETRY_SECONDS)
                 self.assertIsNone(store.claim(now + delay - 1))
                 now += delay
@@ -75,8 +75,25 @@ class GatewayStoreTests(unittest.TestCase):
 
             self.assertIsNotNone(job)
             assert job is not None
-            store.complete(job.id)
+            self.assertTrue(store.complete(job.id, job.lease_token))
             self.assertIsNone(store.claim(job.lease_until))
+
+    def test_stale_worker_cannot_mutate_reclaimed_lease(self) -> None:
+        """Catches a late worker clearing the lease owned by a newer claim."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            store.enqueue_delivery("delivery-fenced", "pull_request", b"{}", 100)
+            stale = store.claim(100)
+            self.assertIsNotNone(stale)
+            assert stale is not None
+            current = store.claim(stale.lease_until)
+            self.assertIsNotNone(current)
+            assert current is not None
+            self.assertNotEqual(stale.lease_token, current.lease_token)
+
+            self.assertFalse(store.retry(stale.id, stale.lease_token, "late worker", current.lease_until))
+            self.assertFalse(store.complete(stale.id, stale.lease_token))
+            self.assertIsNone(store.claim(current.lease_until - 1))
 
 
 if __name__ == "__main__":
