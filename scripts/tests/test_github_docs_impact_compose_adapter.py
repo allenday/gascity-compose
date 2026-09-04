@@ -241,17 +241,16 @@ class CandidateBridgeTests(unittest.TestCase):
             marker.write_text(json.dumps({"bead_id": "bead-journey", "child_key": "child-1", "journey_identity": "github-docs-journey:17:key:" + SHA, "admitted_child": admitted, "dispatched": True}))
             update = {"schema_version": 1, "kind": "github-docs-journey-child-update", "admitted_child": admitted, "state": "complete"}
             commands = [
-                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed"}]), stderr=""),
-                mock.Mock(returncode=0, stdout=json.dumps({"output": "• " + json.dumps(update)}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps([{"assignee": "mc-1", "status": "closed", "metadata": {"docs-journey.result": json.dumps(update)}}]), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"children": [{"key": "child-1", "state": "complete"}]}}), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete", "actions": [{"kind": "create_docs_pr", "state": "completed"}]}}), stderr=""),
             ]
             environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_JOURNEY_TARGET": "my-project/github-docs-impact.docs-journey", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
                 self.assertEqual(dispatcher.harvest_journey_updates(), [marker.stem])
-            self.assertEqual(command.call_count, 4)
-            self.assertIn("record-child-update", command.call_args_list[2].args[0])
-            self.assertIn("project-until-settled", command.call_args_list[3].args[0])
+            self.assertEqual(command.call_count, 3)
+            self.assertIn("record-child-update", command.call_args_list[1].args[0])
+            self.assertIn("project-until-settled", command.call_args_list[2].args[0])
             self.assertEqual(json.loads(marker.read_text())["dispatched"], "recorded")
 
     def test_journey_worker_update_must_echo_its_admitted_child(self) -> None:
