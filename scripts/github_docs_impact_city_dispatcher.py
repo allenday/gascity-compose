@@ -415,7 +415,22 @@ def create_pending() -> list[str]:
                 continue
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
-        result = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"], capture_output=True, text=True, check=False, timeout=45)
+        # Evidence bundles can exceed Linux's argv limit.  Keep their exact
+        # contents out of the process argument vector while preserving the
+        # immutable request that the gateway already persisted.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as handle:
+            handle.write(description)
+            body_path = pathlib.Path(handle.name)
+        try:
+            result = subprocess.run(
+                ["gc", "--city", city, "--rig", rig, "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--body-file", str(body_path), "--json"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=45,
+            )
+        finally:
+            body_path.unlink(missing_ok=True)
         if result.returncode:
             continue
         try:

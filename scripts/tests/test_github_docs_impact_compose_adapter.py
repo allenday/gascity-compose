@@ -278,6 +278,9 @@ class CandidateBridgeTests(unittest.TestCase):
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=result) as command:
                 self.assertEqual(dispatcher.create_pending(), [request.stem])
             self.assertEqual(command.call_args.args[0][:6], ["gc", "--city", "/city", "--rig", "my-project", "bd"])
+            invocation = command.call_args.args[0]
+            self.assertIn("--body-file", invocation)
+            self.assertNotIn("--description", invocation)
 
     def test_city_dispatcher_retires_superseded_pr_work_before_dispatching_new_sha(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
