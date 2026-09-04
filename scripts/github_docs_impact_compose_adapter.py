@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -220,6 +221,92 @@ def _gateway(payload: dict[str, Any] | None = None) -> impact.GitHubAppProjectio
     return impact.GitHubAppProjectionGateway(app, installation_id)
 
 
+def _snapshot_roots() -> tuple[pathlib.Path, pathlib.PurePosixPath]:
+    """Return trusted staging and City-visible paths for immutable sources."""
+    state_root = _path_env("GC_SERVICE_STATE_ROOT")
+    stage_root = pathlib.Path(os.environ.get("GC_GITHUB_DOCS_SNAPSHOT_DIR", "").strip() or state_root / "direct-snapshots")
+    city_root = pathlib.PurePosixPath(os.environ.get("GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT", "/var/lib/github-intake/direct-snapshots").strip())
+    if not city_root.is_absolute() or ".." in city_root.parts:
+        raise ValueError("GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT must be an absolute safe path")
+    return stage_root, city_root
+
+
+def _stage_direct_snapshot(request: dict[str, Any], installation_id: str) -> dict[str, Any]:
+    """Checkout the reviewed SHA once in trusted state, never in City review state."""
+    repository_id = str(request.get("repository_id") or "")
+    repository = str(request.get("repository") or "")
+    head_sha = str(request.get("snapshot_sha") or "").lower()
+    if not repository_id or not repository or len(head_sha) != 40 or any(char not in "0123456789abcdef" for char in head_sha):
+        raise ValueError("direct snapshot requires a canonical repository and exact SHA")
+    stage_root, city_root = _snapshot_roots()
+    snapshot_id = hashlib.sha256(f"{repository_id}:{repository}:{head_sha}".encode("utf-8")).hexdigest()
+    checkout = stage_root / snapshot_id
+    city_path = str(city_root / snapshot_id)
+
+    def recorded_snapshot() -> dict[str, Any] | None:
+        try:
+            value = json.loads((checkout / ".gascity-snapshot.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        required = {"schema_version", "kind", "repository_id", "repository", "head_sha", "tree_sha", "path"}
+        if (not isinstance(value, dict) or set(value) != required or value.get("schema_version") != 1
+                or value.get("kind") != "github-pr-source-snapshot"
+                or value.get("repository_id") != repository_id or value.get("repository") != repository
+                or value.get("head_sha") != head_sha or value.get("path") != city_path
+                or not isinstance(value.get("tree_sha"), str) or len(value["tree_sha"]) != 40):
+            return None
+        return value
+
+    existing = recorded_snapshot()
+    if existing is not None:
+        return {key: existing[key] for key in ("schema_version", "kind", "head_sha", "tree_sha", "path")}
+    if checkout.exists():
+        raise ValueError("existing direct snapshot does not match its immutable descriptor")
+    stage_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = pathlib.Path(tempfile.mkdtemp(prefix=".snapshot-", dir=stage_root))
+    try:
+        config = common.load_effective_config()
+        app = config.get("app") if isinstance(config, dict) else None
+        if not isinstance(app, dict):
+            raise ValueError("GitHub App config is unavailable for source snapshot")
+        token = common.create_installation_token(app, installation_id)
+        basic_auth = __import__("base64").b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+        git_env = os.environ.copy()
+        git_env.update({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"http.{common.github_web_base().rstrip('/')}/.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic_auth}",
+        })
+        def git(*arguments: str) -> str:
+            result = subprocess.run(["git", *arguments], cwd=temporary, capture_output=True, text=True, check=False, timeout=90, env=git_env)
+            if result.returncode:
+                raise ValueError(result.stderr.strip() or "could not stage immutable source snapshot")
+            return result.stdout.strip()
+        git("init", "--quiet")
+        git("remote", "add", "origin", common.repository_git_url(repository))
+        git("fetch", "--depth", "1", "origin", head_sha)
+        git("checkout", "--detach", "--quiet", "FETCH_HEAD")
+        if git("rev-parse", "HEAD") != head_sha:
+            raise ValueError("fetched source snapshot does not match the reviewed SHA")
+        tree_sha = git("rev-parse", "HEAD^{tree}")
+        if len(tree_sha) != 40 or any(char not in "0123456789abcdef" for char in tree_sha.lower()):
+            raise ValueError("fetched source snapshot has no immutable tree SHA")
+        descriptor = {
+            "schema_version": 1, "kind": "github-pr-source-snapshot", "repository_id": repository_id,
+            "repository": repository, "head_sha": head_sha, "tree_sha": tree_sha.lower(), "path": city_path,
+        }
+        _atomic_write(temporary / ".gascity-snapshot.json", _assignment_bytes(descriptor), mode=0o400)
+        temporary.replace(checkout)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    descriptor = recorded_snapshot()
+    if descriptor is None:
+        raise ValueError("immutable source snapshot staging did not persist its descriptor")
+    return {key: descriptor[key] for key in ("schema_version", "kind", "head_sha", "tree_sha", "path")}
+
+
 def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any], signed_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Normalize one blocking review into the one-child PR recursion contract."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
@@ -293,7 +380,8 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     admission = json.loads(result.stdout)
     if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child"}:
         raise ValueError("direct child admission returned an invalid record")
-    marker = {**request, "admission": admission, "direct_child": admission["admitted_child"], "bead_id": None, "dispatched": False}
+    snapshot = _stage_direct_snapshot(request, installation_id)
+    marker = {**request, "snapshot": snapshot, "admission": admission, "direct_child": admission["admitted_child"], "bead_id": None, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
 

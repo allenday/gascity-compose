@@ -171,7 +171,7 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
     required = {
         "schema_version", "kind", "candidate_digest", "repository_id", "repository", "pr_number",
         "source_key", "snapshot_sha", "source_branch", "candidate_identity", "coverage_cells",
-        "execution_budgets", "admission", "direct_child", "bead_id", "dispatched",
+        "execution_budgets", "snapshot", "admission", "direct_child", "bead_id", "dispatched",
     }
     if not isinstance(marker, dict) or set(marker) != required or marker.get("schema_version") != 1:
         return None
@@ -183,10 +183,19 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
         return None
     if type(marker.get("pr_number")) is not int or not isinstance(marker.get("coverage_cells"), list) or not marker["coverage_cells"]:
         return None
-    budgets, child = marker.get("execution_budgets"), marker.get("direct_child")
+    budgets, child, snapshot = marker.get("execution_budgets"), marker.get("direct_child"), marker.get("snapshot")
     if not isinstance(budgets, dict) or budgets.get("max_children") != 1 or budgets.get("max_docs_prs") != 1:
         return None
     if not isinstance(child, dict) or not isinstance(marker.get("admission"), dict):
+        return None
+    snapshot_fields = {"schema_version", "kind", "head_sha", "tree_sha", "path"}
+    snapshot_root = os.environ.get("GC_CITY_DOCS_SNAPSHOT_ROOT", "/var/lib/github-intake/direct-snapshots").rstrip("/")
+    if (not isinstance(snapshot, dict) or set(snapshot) != snapshot_fields
+            or snapshot.get("schema_version") != 1 or snapshot.get("kind") != "github-pr-source-snapshot"
+            or snapshot.get("head_sha") != marker.get("snapshot_sha")
+            or not isinstance(snapshot.get("tree_sha"), str) or len(snapshot["tree_sha"]) != 40
+            or any(char not in "0123456789abcdef" for char in snapshot["tree_sha"].lower())
+            or not isinstance(snapshot.get("path"), str) or not snapshot["path"].startswith(snapshot_root + "/")):
         return None
     return marker
 
@@ -206,15 +215,17 @@ def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> 
     if not isinstance(values, list):
         return False, None
     expected = marker.get("direct_child")
+    expected_snapshot = marker.get("snapshot")
     for value in values:
         metadata = value.get("metadata") if isinstance(value, dict) else None
         recorded = metadata.get("github.docs_direct_child") if isinstance(metadata, dict) else None
+        recorded_snapshot = metadata.get("github.docs_direct_child.snapshot") if isinstance(metadata, dict) else None
         try:
             recorded = json.loads(recorded) if isinstance(recorded, str) else recorded
         except json.JSONDecodeError:
             continue
         bead_id = value.get("id") if isinstance(value, dict) else None
-        if recorded == expected and isinstance(bead_id, str) and bead_id:
+        if recorded == expected and recorded_snapshot == expected_snapshot and isinstance(bead_id, str) and bead_id:
             return True, bead_id
     return True, None
 
@@ -239,7 +250,7 @@ def dispatch_direct_child_pending() -> list[str]:
                 # budget until City has supplied a complete adoption view.
                 continue
             if bead_id is None:
-                metadata = json.dumps({"github.docs_direct_child": marker["direct_child"]}, sort_keys=True, separators=(",", ":"))
+                metadata = json.dumps({"github.docs_direct_child": marker["direct_child"], "github.docs_direct_child.snapshot": marker["snapshot"]}, sort_keys=True, separators=(",", ":"))
                 created = subprocess.run(
                     ["gc", "--city", city, "--rig", rig, "bd", "create", "Implement direct docs child", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", json.dumps(marker, sort_keys=True), "--json"],
                     capture_output=True, text=True, check=False, timeout=45,
@@ -275,12 +286,20 @@ def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> 
         update = json.loads(value) if isinstance(value, str) else value
     except json.JSONDecodeError:
         return None
-    if not isinstance(update, dict) or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-direct-child-update":
+    if not isinstance(update, dict) or set(update) != {"schema_version", "kind", "admitted_child", "state", "documentation_patch"} or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-direct-child-update":
         return None
     if update.get("admitted_child") != marker.get("direct_child") or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}:
         return None
-    branch = update.get("documentation_branch")
-    if branch is not None and (not isinstance(branch, dict) or set(branch) != {"branch", "commit_sha", "evidence"} or not isinstance(branch.get("branch"), str) or not branch["branch"].startswith("gas-city/") or not isinstance(branch.get("commit_sha"), str) or len(branch["commit_sha"]) != 40 or any(char not in "0123456789abcdef" for char in branch["commit_sha"].lower()) or not isinstance(branch.get("evidence"), list) or not branch["evidence"] or any(not isinstance(item, str) or not item for item in branch["evidence"])):
+    patch = update.get("documentation_patch")
+    if (update.get("state") == "complete") != (patch is not None):
+        return None
+    patch_fields = {"schema_version", "status", "generated_at", "identity", "patch_sha256", "diff", "files", "claims", "checks", "artifact_sha256"}
+    if patch is not None and (not isinstance(patch, dict) or set(patch) != patch_fields
+                              or patch.get("schema_version") != 1 or patch.get("status") != "proposed"
+                              or not isinstance(patch.get("identity"), dict)
+                              or patch["identity"].get("head_sha") != marker.get("snapshot_sha")
+                              or not isinstance(patch.get("patch_sha256"), str) or len(patch["patch_sha256"]) != 64
+                              or not isinstance(patch.get("artifact_sha256"), str) or len(patch["artifact_sha256"]) != 64):
         return None
     return update
 

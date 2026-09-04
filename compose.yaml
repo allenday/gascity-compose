@@ -75,6 +75,10 @@ services:
       GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
       GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
       GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
+      # The App stages an exact-SHA source checkout here. City sees it only
+      # through its separate read-only intake-state mount below.
+      GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots
+      GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-intake/direct-snapshots
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
@@ -155,6 +159,7 @@ services:
       GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
       GC_CITY_DOCS_DIRECT_CHILD_TARGET: ${GC_CITY_DOCS_DIRECT_CHILD_TARGET:-gascity/github-docs-impact.docs-recursion-direct-child}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
+      GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-intake/direct-snapshots
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       CODEX_HOME: /run/codex

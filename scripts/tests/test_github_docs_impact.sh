@@ -97,6 +97,7 @@ require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
 require_city 'GC_CITY_DOCS_DIRECT_CHILD_TARGET:.*GC_CITY_DOCS_DIRECT_CHILD_TARGET'
+require_city 'GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-intake/direct-snapshots'
 require_city 'docs-review:/var/lib/github-docs-impact/review'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 # City runs as HOST_UID:GID, so its supervisor state and real home must not
@@ -153,6 +154,8 @@ done
 # the run, and asks the runtime adapter to dispatch only after that record.
 require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-intake/direct-snapshots'
 require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
 require_webhook 'scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro'
 require_webhook 'scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro'
