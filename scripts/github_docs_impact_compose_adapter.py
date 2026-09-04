@@ -18,7 +18,6 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
 import time
 from typing import Any
 
@@ -222,80 +221,69 @@ def _gateway(payload: dict[str, Any] | None = None) -> impact.GitHubAppProjectio
     return impact.GitHubAppProjectionGateway(app, installation_id)
 
 
-def _journey_request(candidate: dict[str, Any], assignment: dict[str, Any], installation_id: str) -> dict[str, Any]:
-    """Normalize one exact blocking review into the docs-journey contract.
-
-    The journey snapshot is the reviewed pull-request SHA: it is the only
-    immutable revision the review artifact authorizes.  ``default_branch`` is
-    retained as the eventual follow-up PR base, while the controller validates
-    the admitted child against this reviewed snapshot.
-    """
+def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one blocking review into the one-child PR recursion contract."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
     identity = artifact.get("identity") if isinstance(artifact, dict) else None
     evidence_bundle = assignment.get("evidence_bundle") if isinstance(assignment, dict) else None
-    proposal_identity = evidence_bundle.get("proposal_identity") if isinstance(evidence_bundle, dict) else None
-    if not isinstance(identity, dict) or not isinstance(proposal_identity, dict):
+    coverage_cells = candidate.get("coverage_cells") if isinstance(candidate, dict) else None
+    if not isinstance(identity, dict) or not isinstance(evidence_bundle, dict):
         raise ValueError("docs-change candidate lacks immutable review identity")
     repository_id = str(identity.get("repository_id") or "")
     repository = str(identity.get("repository") or "")
     pr_number = identity.get("pr_number")
     head_sha = str(identity.get("head_sha") or "").lower()
     source_key = str(identity.get("source_key") or "")
-    followup_base = str(evidence_bundle.get("source_head_ref") or "") if isinstance(evidence_bundle, dict) else ""
-    if not repository_id or not repository or type(pr_number) is not int or not head_sha or not source_key or not followup_base:
+    followup_base = str(evidence_bundle.get("source_head_ref") or "")
+    if (not repository_id or not repository or type(pr_number) is not int or not head_sha
+            or not source_key or not followup_base or not isinstance(coverage_cells, list)
+            or not coverage_cells or not all(isinstance(cell, dict) for cell in coverage_cells)):
         raise ValueError("docs-change candidate lacks immutable review identity")
+    budgets = {
+        "max_depth": 1,
+        "max_children": 1,
+        "max_docs_prs": 1,
+        "max_elapsed_seconds": 24 * 60 * 60,
+        "max_non_progress": 3,
+    }
+    candidate_digest = hashlib.sha256(_assignment_bytes(candidate)).hexdigest()
     return {
+        "schema_version": 1,
+        "kind": "github-pr-docs-direct-child",
+        "candidate_digest": candidate_digest,
         "repository_id": repository_id,
         "repository": repository,
-        "installation_id": installation_id,
-        # This is the reviewed source branch, not the PR's base branch.  The
-        # worker's docs PR must merge into the contributor's revision so its
-        # merge creates a new source SHA and re-runs the original Check.
-        "default_branch": followup_base,
-        "default_branch_sha": head_sha,
-        "source": {
-            "kind": "github-pull-request",
-            "key": source_key,
-            "url": f"https://github.com/{repository}/pull/{pr_number}",
-            "projection_capabilities": [],
+        "pr_number": pr_number,
+        "source_key": source_key,
+        "snapshot_sha": head_sha,
+        "source_branch": followup_base,
+        "candidate_identity": identity,
+        "coverage_cells": coverage_cells,
+        "execution_budgets": budgets,
+        "direct_child": {
+            "key": f"github-pr-docs-child:{candidate_digest}",
+            "source_key": source_key,
+            "snapshot_sha": head_sha,
+            "coverage_cells": coverage_cells,
+            "execution_budgets": budgets,
         },
-        "docs_impact_source_key": source_key,
-        "documentation_index": "README.md",
-        "domain": "techdocs",
-        "role": "developer",
-        "job": "use the changed developer-facing interface",
-        "starting_context": "a clone of the repository at the reviewed pull-request revision",
-        "success_condition": "the developer can complete the changed workflow from repository documentation",
-        "backfill_policy": "blocking-only",
-        "budgets": {
-            "max_depth": 2,
-            "max_children": 1,
-            "max_docs_prs": 1,
-            "max_debt_issues": 4,
-            "max_elapsed_seconds": 24 * 60 * 60,
-            "max_non_progress": 3,
-        },
+        "bead_id": None,
+        "dispatched": False,
     }
 
 
-def _journey_marker_path(candidate: dict[str, Any]) -> pathlib.Path:
-    canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journey-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
-
-
-def _admit_docs_journey(candidate: dict[str, Any], on_admitted: Callable[[], None] | None = None) -> dict[str, Any]:
-    """Persist and project a blocking journey, then request one City sling.
-
-    This deliberately stops at dispatch.  Worker-result harvesting and
-    check terminalization are a separate, source-bound lifecycle phase.
-    """
+def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Persist one SHA-bound child before the generic review run is advanced."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
     if not isinstance(artifact, dict) or artifact.get("verdict") != "docs-change-required":
-        raise ValueError("only docs-change-required candidates may enter docs-journey")
-    marker_path = _journey_marker_path(candidate)
+        raise ValueError("only docs-change-required candidates may enter direct child dispatch")
+    canonical = _assignment_bytes(candidate)
+    marker_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
     if marker_path.exists():
-        return json.loads(marker_path.read_text(encoding="utf-8"))
-    installation_id = _installation_id_from_config()
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if not isinstance(marker, dict) or marker.get("candidate_digest") != hashlib.sha256(canonical).hexdigest():
+            raise ValueError("invalid durable direct child marker")
+        return marker
     assignment_identity = artifact.get("identity")
     if not isinstance(assignment_identity, dict):
         raise ValueError("docs-change candidate has no assignment identity")
@@ -304,50 +292,9 @@ def _admit_docs_journey(candidate: dict[str, Any], on_admitted: Callable[[], Non
     review_run = review_store.load(source_key)
     if review_run is None or not isinstance(review_run.get("assignment"), dict):
         raise ValueError("docs-change candidate has no durable assignment")
-    request = _journey_request(candidate, review_run["assignment"], installation_id)
-    payload = {"request": request, "decision": {"artifact": artifact, "journey_disposition": "blocking"}}
-    command = [
-        sys.executable, f"{PACK_SCRIPTS}/github_intake_docs_journey_commands.py", "start-or-admit", "--once",
-        "--store", str(_path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"),
-        "--input", json.dumps(payload, sort_keys=True, separators=(",", ":")),
-    ]
-    started = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    if started.returncode:
-        raise ValueError(started.stderr.strip() or "docs journey admission failed")
-    result = json.loads(started.stdout)
-    journey = result.get("journey") if isinstance(result, dict) else None
-    journey_identity = journey.get("identity") if isinstance(journey, dict) else None
-    if not isinstance(journey_identity, str) or not journey_identity:
-        raise ValueError("docs journey admission returned no identity")
-    if on_admitted is not None:
-        on_admitted()
-    projected = subprocess.run(command[:2] + ["project-until-settled", "--once", "--store", command[5], "--identity", journey_identity], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    if projected.returncode:
-        raise ValueError(projected.stderr.strip() or "docs journey projection failed")
-    settled = json.loads(projected.stdout)
-    settled_journey = settled.get("journey") if isinstance(settled, dict) else None
-    ready = settled.get("worker_ready_children") if isinstance(settled, dict) else None
-    if not isinstance(settled_journey, dict) or not isinstance(ready, list) or len(ready) != 1:
-        raise ValueError("docs journey did not produce exactly one dispatchable child")
-    child = next((item for item in settled_journey.get("children", []) if isinstance(item, dict) and item.get("key") == ready[0]), None)
-    bead_action = next((item for item in settled_journey.get("actions", []) if isinstance(item, dict) and item.get("kind") == "create_bead" and item.get("child_key") == ready[0] and item.get("state") == "completed"), None)
-    bead_id = ((bead_action or {}).get("resource") or {}).get("id") if isinstance(bead_action, dict) else None
-    if not isinstance(child, dict) or not isinstance(bead_id, str) or not bead_id:
-        raise ValueError("docs journey did not persist dispatchable child evidence")
-    marker = {"bead_id": bead_id, "child_key": ready[0], "journey_identity": journey_identity, "admitted_child": child, "dispatched": False}
+    marker = _direct_child_request(candidate, review_run["assignment"])
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
-
-
-def _installation_id_from_config() -> str:
-    value = os.environ.get("GITHUB_INSTALLATION_ID", "")
-    if not str(value).strip():
-        config = common.load_effective_config()
-        app = config.get("app") if isinstance(config, dict) else None
-        value = (app or {}).get("installation_id", "")
-    if not str(value).strip():
-        raise ValueError("GitHub App installation id is unavailable for docs journey")
-    return str(value)
 
 
 class ComposeAdapter:
@@ -490,19 +437,12 @@ def candidates(now: float, source_key: str | None = None) -> list[dict[str, Any]
                 result.append({"accepted": False, "reason": "stale review run"})
                 continue
             if isinstance(artifact, dict) and artifact.get("verdict") == "docs-change-required":
-                # Do not terminalize the visible Check before the exact
-                # blocking decision has become a durable City journey.  The
-                # later worker-result bridge owns candidate acceptance and the
-                # check's terminal transition.
-                accepted: dict[str, Any] | None = None
-                def mark_journey_pending() -> None:
-                    nonlocal accepted
-                    accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
-                journey = _admit_docs_journey(candidate, mark_journey_pending)
-                # The generic runtime owns the visible Check's durable
-                # ``journey-pending`` transition. Admission is deliberately
-                # first: a crash cannot leave a pending Check with no journey.
-                result.append({"journey": journey, "review": accepted})
+                # The direct child is the sole executable PR continuation.
+                # Persist it before advancing the generic review record so a
+                # crash cannot leave a pending Check without bounded work.
+                direct_child = _persist_direct_child(candidate)
+                accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
+                result.append({"direct_child": direct_child, "review": accepted})
             else:
                 result.append(runtime.accept_candidate(store, candidate, adapter, now=now))
         except (OSError, ValueError, json.JSONDecodeError) as exc:

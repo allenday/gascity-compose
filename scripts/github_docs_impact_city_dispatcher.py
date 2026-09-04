@@ -154,6 +154,77 @@ def dispatch_pending() -> list[str]:
     return dispatched
 
 
+def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None:
+    """Accept only a complete, bounded direct-child handoff."""
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {
+        "schema_version", "kind", "candidate_digest", "repository_id", "repository", "pr_number",
+        "source_key", "snapshot_sha", "source_branch", "candidate_identity", "coverage_cells",
+        "execution_budgets", "direct_child", "bead_id", "dispatched",
+    }
+    if not isinstance(marker, dict) or set(marker) != required or marker.get("schema_version") != 1:
+        return None
+    if marker.get("kind") != "github-pr-docs-direct-child" or marker.get("dispatched") is not False:
+        return None
+    if not all(isinstance(marker.get(key), str) and marker[key] for key in ("candidate_digest", "source_key", "snapshot_sha", "source_branch")):
+        return None
+    if marker.get("bead_id") is not None and (not isinstance(marker.get("bead_id"), str) or not marker["bead_id"]):
+        return None
+    if type(marker.get("pr_number")) is not int or not isinstance(marker.get("coverage_cells"), list) or not marker["coverage_cells"]:
+        return None
+    budgets, child = marker.get("execution_budgets"), marker.get("direct_child")
+    if not isinstance(budgets, dict) or budgets.get("max_children") != 1 or budgets.get("max_docs_prs") != 1:
+        return None
+    if not isinstance(child, dict) or child.get("source_key") != marker["source_key"] or child.get("snapshot_sha") != marker["snapshot_sha"]:
+        return None
+    return marker
+
+
+def dispatch_direct_child_pending() -> list[str]:
+    """Sling exactly the child already durably admitted for a PR revision."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, target = _reviewer_target()
+    dispatched: list[str] = []
+    for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
+        marker = _pending_direct_child_marker(marker_path)
+        if marker is None:
+            continue
+        if marker["bead_id"] is None:
+            metadata = json.dumps({"github.docs_direct_child": marker["direct_child"]}, sort_keys=True, separators=(",", ":"))
+            created = subprocess.run(
+                ["gc", "--city", city, "--rig", rig, "bd", "create", "Implement direct docs child", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", json.dumps(marker, sort_keys=True), "--json"],
+                capture_output=True, text=True, check=False, timeout=45,
+            )
+            if created.returncode:
+                continue
+            try:
+                response = json.loads(created.stdout)
+                if isinstance(response, list) and len(response) == 1:
+                    response = response[0]
+                bead_id = response.get("id") if isinstance(response, dict) else None
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(bead_id, str) or not bead_id:
+                continue
+            marker = {**marker, "bead_id": bead_id}
+            _atomic_write(marker_path, json.dumps(marker, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        result = subprocess.run(
+            ["gc", "--city", city, "sling", target, str(marker["bead_id"]), "--force", "--no-convoy", "--no-formula", "--nudge", "--json"],
+            capture_output=True, text=True, check=False, timeout=45,
+        )
+        if result.returncode:
+            continue
+        _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        dispatched.append(marker_path.stem)
+    return dispatched
+
+
 def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
     """Validate one controller-projected journey child dispatch request."""
     try:
@@ -614,7 +685,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "journeys": dispatch_journey_pending(), "journey_updates": harvest_journey_updates(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "direct_children": dispatch_direct_child_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

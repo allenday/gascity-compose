@@ -77,7 +77,7 @@ def review() -> dict[str, object]:
 
 
 class CandidateBridgeTests(unittest.TestCase):
-    def test_stale_blocking_candidate_is_ignored_before_journey_projection(self) -> None:
+    def test_stale_blocking_candidate_is_ignored_before_direct_child_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
@@ -86,52 +86,68 @@ class CandidateBridgeTests(unittest.TestCase):
             store = mock.Mock()
             store.load.return_value = {"state": "stale"}
             environment = {"GC_GITHUB_DOCS_CANDIDATE_DIR": str(root / "candidates"), "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs")}
-            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter, "ComposeAdapter"), mock.patch.object(adapter, "_gateway"), mock.patch.object(adapter, "_admit_docs_journey") as admit:
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter, "ComposeAdapter"), mock.patch.object(adapter, "_gateway"), mock.patch.object(adapter, "_persist_direct_child") as persist:
                 self.assertEqual(adapter.candidates(100), [{"accepted": False, "reason": "stale review run"}])
-            admit.assert_not_called()
+            persist.assert_not_called()
 
-    def test_docs_change_candidate_becomes_a_source_bound_journey_request(self) -> None:
+    def test_docs_change_candidate_becomes_a_source_bound_direct_child_request(self) -> None:
         candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
         source_assignment = assignment()
         source_assignment["evidence_bundle"]["source_head_ref"] = "release/docs-revision"
+        candidate["coverage_cells"] = [
+            {"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]},
+            {"identity": "developer:use-interface:reference", "classification": "unmet", "evidence_paths": ["docs/reference.md"]},
+        ]
 
-        request = adapter._journey_request(candidate, source_assignment, "91")
+        request = adapter._direct_child_request(candidate, source_assignment)
 
         self.assertEqual(request["repository"], "example/docs")
-        self.assertEqual(request["docs_impact_source_key"], source_assignment["identity"]["source_key"])
-        self.assertEqual(request["default_branch"], "release/docs-revision")
-        self.assertNotEqual(request["default_branch"], source_assignment["evidence_bundle"]["proposal_identity"]["base_ref"])
-        self.assertEqual(request["source"]["kind"], "github-pull-request")
-        self.assertEqual(request["source"]["url"], "https://github.com/example/docs/pull/9")
-        self.assertEqual(request["default_branch_sha"], SHA)
+        self.assertEqual(request["source_key"], source_assignment["identity"]["source_key"])
+        self.assertEqual(request["snapshot_sha"], SHA)
+        self.assertEqual(request["coverage_cells"], candidate["coverage_cells"])
+        self.assertEqual(request["execution_budgets"]["max_children"], 1)
+        self.assertEqual(request["execution_budgets"]["max_docs_prs"], 1)
 
-    def test_docs_change_candidate_is_admitted_projected_then_queued_for_city(self) -> None:
+    def test_docs_change_candidate_persists_one_direct_child_without_controller_handoff(self) -> None:
         candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
+        candidate["coverage_cells"] = [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}]
         root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         run = {"assignment": assignment()}
-        started = {"journey": {"identity": "github-docs-journey:17:source:" + SHA}}
-        projected = {"journey": {"children": [{"key": "child-1"}], "actions": [{"kind": "create_bead", "child_key": "child-1", "state": "completed", "resource": {"id": "bead-1"}}]}, "worker_ready_children": ["child-1"]}
-        commands = [
-            mock.Mock(returncode=0, stdout=json.dumps(started), stderr=""),
-            mock.Mock(returncode=0, stdout=json.dumps(projected), stderr=""),
-        ]
         store = mock.Mock()
         store.load.return_value = run
         environment = {
             "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"),
             "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs"),
-            "GITHUB_INSTALLATION_ID": "91",
         }
-        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run", side_effect=commands) as command:
-            marker = adapter._admit_docs_journey(candidate)
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run") as command:
+            marker = adapter._persist_direct_child(candidate)
 
-        self.assertEqual(marker["bead_id"], "bead-1")
+        self.assertEqual(marker["kind"], "github-pr-docs-direct-child")
+        self.assertEqual(marker["source_key"], assignment()["identity"]["source_key"])
+        self.assertEqual(marker["snapshot_sha"], SHA)
+        self.assertEqual(marker["coverage_cells"], candidate["coverage_cells"])
+        self.assertEqual(marker["execution_budgets"]["max_children"], 1)
         self.assertFalse(marker["dispatched"])
-        self.assertEqual(command.call_count, 2)
-        self.assertIn("start-or-admit", command.call_args_list[0].args[0])
-        self.assertIn("project-until-settled", command.call_args_list[1].args[0])
-        self.assertEqual(len(list((root / "journey-dispatch").glob("*.json"))), 1)
+        command.assert_not_called()
+        self.assertEqual(len(list((root / "direct-child-dispatch").glob("*.json"))), 1)
+        self.assertFalse((root / "journey-dispatch").exists())
+
+    def test_replaying_candidate_reuses_its_direct_child_without_duplicate_followup_intent(self) -> None:
+        candidate = {"artifact": {**review(), "verdict": "docs-change-required"}}
+        candidate["coverage_cells"] = [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}]
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = mock.Mock()
+            store.load.return_value = {"assignment": assignment()}
+            environment = {"GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(root / "assignments"), "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(root / "runs")}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True):
+                first = adapter._persist_direct_child(candidate)
+                replay = adapter._persist_direct_child(candidate)
+
+            self.assertEqual(replay, first)
+            self.assertEqual(len(list((root / "direct-child-dispatch").glob("*.json"))), 1)
+            self.assertNotIn("followup", first)
 
     def test_final_assistant_document_requires_exact_json(self) -> None:
         self.assertIsNone(adapter._final_assistant_document({"entries": [{"role": "assistant", "text": "Here is the result: {}"}]}))
@@ -223,16 +239,16 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "gascity/github-docs-impact.docs-impact-reviewer"])
             self.assertEqual(json.loads(marker.read_text()), {"bead_id": "bead-1", "source_key": "github-pr:17:9:" + SHA, "dispatched": True})
 
-    def test_city_dispatcher_slings_only_projected_journey_child(self) -> None:
+    def test_city_dispatcher_slings_only_persisted_direct_child(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
-            marker = root / "journey-dispatch" / ("d" * 64 + ".json")
+            marker = root / "direct-child-dispatch" / ("d" * 64 + ".json")
             marker.parent.mkdir()
-            marker.write_text(json.dumps({"bead_id": "bead-journey", "child_key": "child-1", "journey_identity": "github-docs-journey:17:key:" + SHA, "admitted_child": {}, "dispatched": False}))
-            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_JOURNEY_TARGET": "my-project/github-docs-impact.docs-journey"}
+            marker.write_text(json.dumps({"schema_version": 1, "kind": "github-pr-docs-direct-child", "candidate_digest": "d" * 64, "repository_id": "17", "repository": "example/docs", "pr_number": 9, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "source_branch": "feature/docs", "candidate_identity": assignment()["identity"], "coverage_cells": [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}], "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3}, "direct_child": {"key": "github-pr-docs-child:" + "d" * 64, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "coverage_cells": [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}], "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3}}, "bead_id": "bead-direct", "dispatched": False}))
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_REVIEW_TARGET": "my-project/github-docs-impact.docs-impact-reviewer"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="{}", stderr="")) as command:
-                self.assertEqual(dispatcher.dispatch_journey_pending(), [marker.stem])
-            self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-journey"])
+                self.assertEqual(dispatcher.dispatch_direct_child_pending(), [marker.stem])
+            self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-impact-reviewer"])
             self.assertTrue(json.loads(marker.read_text())["dispatched"])
 
     def test_city_dispatcher_records_one_completed_journey_worker_update(self) -> None:
