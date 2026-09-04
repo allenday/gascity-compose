@@ -70,6 +70,22 @@ assignment, then uses the App credentials to publish the compact Check Run or
 App-owned follow-up PR. It periodically reconciles interrupted runs. No
 proposal diff or deployment-admin page is linked from GitHub.
 
+The gateway keeps its accepted-delivery inbox and leased lifecycle jobs in
+`state/github-intake/gateway.sqlite`; do not remove this file when recreating
+only `city`. To replay the existing external docs-impact controller once during
+development (without creating a separate controller or a new GitHub delivery),
+run:
+
+```bash
+docker compose --profile github-docs-impact exec github-webhook \
+  python3 /opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py reconcile --once
+```
+
+The gateway worker continues queued jobs from that same SQLite state. A
+docs-required proposal may therefore finish its App-owned follow-up against
+the source PR branch after City is recreated; replay remains idempotent and
+does not create another follow-up intent.
+
 ## Start the City safely
 
 The `city` service is profile-gated because two supervisors must never reconcile the same mounted

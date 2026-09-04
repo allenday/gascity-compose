@@ -152,3 +152,105 @@ fi
 require_webhook 'GC_HOME: /var/lib/gascity'
 require_webhook 'state/gc-runtime:/var/lib/gascity'
 require_webhook 'github_docs_impact_webhook.py'
+
+# This local fixture exercises the real durable gateway store while keeping the
+# City and GitHub boundaries deterministic.  It proves that recreating City
+# cannot remove an accepted delivery, and that a retry adopts the controller's
+# already-persisted source-branch follow-up intent rather than creating a
+# second one.  It deliberately makes no GitHub request.
+PYTHONDONTWRITEBYTECODE=1 ROOT="$root" python3 - <<'PY'
+import hashlib
+import importlib.util
+import json
+import os
+import pathlib
+import shutil
+import sqlite3
+import sys
+import tempfile
+from unittest import mock
+
+root = pathlib.Path(os.environ["ROOT"])
+module_path = root / "scripts/github_durable_gateway.py"
+spec = importlib.util.spec_from_file_location("github_durable_gateway_smoke", module_path)
+assert spec and spec.loader
+gateway = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = gateway
+spec.loader.exec_module(gateway)
+
+sha = "a" * 40
+source_branch = "feature/docs"
+source_key = f"github-pr:17:9:{sha}"
+payload = json.dumps({
+    "installation": {"id": 17},
+    "action": "opened",
+    "repository": {"id": 17},
+    "pull_request": {"number": 9, "head": {"sha": sha, "ref": source_branch}},
+}).encode()
+
+with tempfile.TemporaryDirectory() as temporary:
+    state_root = pathlib.Path(temporary) / "github-intake"
+    city_root = pathlib.Path(temporary) / "city"
+    store = gateway.GatewayStore(state_root)
+    assert store.enqueue_delivery("city-restart-delivery", "pull_request", payload, 100)
+
+    # Recreate City only; the host-mounted gateway SQLite file remains intact.
+    city_root.mkdir()
+    shutil.rmtree(city_root)
+    city_root.mkdir()
+    accepted_before_city_restart = gateway.GatewayStore(state_root)
+    queued = accepted_before_city_restart.claim(101)
+    assert queued is not None and queued.kind == "intake" and queued.payload == payload
+
+with tempfile.TemporaryDirectory() as temporary:
+    state_root = pathlib.Path(temporary) / "github-intake"
+    review_root = pathlib.Path(temporary) / "docs-review"
+    city_root = pathlib.Path(temporary) / "city"
+    store = gateway.GatewayStore(state_root)
+    assert store.enqueue_delivery("followup-retry-delivery", "pull_request", payload, 100)
+    followup_intents = []
+
+    def run_adapter(job):
+        if job.kind == "dispatch":
+            marker = review_root / "dispatch/assignment.json"
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(json.dumps({"source_key": source_key, "dispatched": True}), encoding="utf-8")
+        elif job.kind == "harvest":
+            candidate = review_root / "candidates/assignment.json"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}), encoding="utf-8")
+        elif job.kind == "project":
+            run = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+            run.parent.mkdir(parents=True, exist_ok=True)
+            if not followup_intents:
+                followup_intents.append({"source_key": source_key, "base": source_branch})
+                # The external controller saves its intent before its GitHub
+                # mutation.  Simulate City disappearing immediately after it.
+                run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup_intents[0]}), encoding="utf-8")
+                raise OSError("City recreated after durable follow-up intent")
+            run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup_intents[0]}), encoding="utf-8")
+        return {}
+
+    environment = {
+        "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+        "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+        "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+    }
+    with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+        for now in range(100, 103):
+            assert gateway.process_one(store, now)
+        assert not gateway.process_one(store, 103)
+
+        # Recreate City only, then reopen the same mounted gateway state and
+        # retry after its bounded backoff.  The persisted intent is adopted.
+        city_root.mkdir()
+        shutil.rmtree(city_root)
+        city_root.mkdir()
+        restarted_city_store = gateway.GatewayStore(state_root)
+        assert gateway.process_one(restarted_city_store, 105)
+        assert not gateway.process_one(restarted_city_store, 106)
+
+    assert followup_intents == [{"source_key": source_key, "base": source_branch}]
+    with sqlite3.connect(state_root / "gateway.sqlite") as connection:
+        assert connection.execute("SELECT status, attempts FROM jobs WHERE kind = 'project'").fetchone() == ("complete", 1)
+PY
