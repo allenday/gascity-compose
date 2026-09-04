@@ -28,6 +28,9 @@ Prometheus scrape targets.
 
 ## GitHub documentation-impact smoke adapter
 
+For the currently implemented durable handoffs and the intended narrower
+pull-request path, see [GitHub docs-impact architecture](docs/github-docs-impact-architecture.md).
+
 Enable the complete GitHub profile with the initial App credentials in ignored
 `.env` or an already-imported protected intake state. Before starting it, set
 the absolute pack checkout and City review-rig settings:

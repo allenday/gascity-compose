@@ -75,18 +75,12 @@ services:
       GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
       GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
       GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
-      # The generic docs-journey controller creates and assigns its durable
-      # child Bead through the configured reviewer rig.  Direct BD avoids a
-      # competing City controller from this independent gateway service.
-      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
       GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
     volumes:
       - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       - ./scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro
       - ./scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro
       - ./scripts/github_docs_impact_compose_adapter.py:/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py:ro
