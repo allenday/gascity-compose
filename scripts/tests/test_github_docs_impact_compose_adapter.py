@@ -124,7 +124,7 @@ class CandidateBridgeTests(unittest.TestCase):
         context_path.parent.mkdir()
         context_path.write_text(json.dumps({"source_branch": "feature/docs-change", "installation_id": "91"}))
         admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": {"identity": "child", "key": "child"}}
-        with mock.patch.dict(os.environ, {**environment, "GITHUB_INSTALLATION_ID": "91"}, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=json.dumps(admission), stderr="")) as command:
+        with mock.patch.dict(os.environ, {**environment, "GITHUB_INSTALLATION_ID": "92"}, clear=False), mock.patch.object(adapter.runtime, "FileDocsReviewStore", return_value=store, create=True), mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=json.dumps(admission), stderr="")) as command:
             marker = adapter._persist_direct_child(candidate)
 
         self.assertEqual(marker["kind"], "github-pr-docs-direct-child")
@@ -134,6 +134,8 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(marker["execution_budgets"]["max_children"], 1)
         self.assertFalse(marker["dispatched"])
         self.assertIn("github_intake_docs_direct_child_admit.py", command.call_args.args[0][1])
+        admission_payload = json.loads(command.call_args.args[0][command.call_args.args[0].index("--input") + 1])
+        self.assertEqual(admission_payload["context"]["installation_id"], "91")
         self.assertEqual(len(list((root / "direct-child-dispatch").glob("*.json"))), 1)
         self.assertFalse((root / "journey-dispatch").exists())
 
@@ -255,11 +257,11 @@ class CandidateBridgeTests(unittest.TestCase):
             direct_child = {"key": "github-pr-docs-child:" + "d" * 64, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "coverage_cells": [{"identity": "developer:use-interface:how-to", "classification": "unmet", "evidence_paths": ["docs/guide.md"]}], "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3}}
             admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": direct_child}
             marker.write_text(json.dumps({"schema_version": 1, "kind": "github-pr-docs-direct-child", "candidate_digest": "d" * 64, "repository_id": "17", "repository": "example/docs", "pr_number": 9, "source_key": "github-pr:17:9:" + SHA, "snapshot_sha": SHA, "source_branch": "feature/docs", "candidate_identity": assignment()["identity"], "coverage_cells": direct_child["coverage_cells"], "execution_budgets": direct_child["execution_budgets"], "admission": admission, "direct_child": direct_child, "bead_id": None, "dispatched": False}))
-            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-journey"}
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child"}
             commands = [mock.Mock(returncode=0, stdout=json.dumps([{"id": "bead-direct", "metadata": {"github.docs_direct_child": direct_child}}]), stderr=""), mock.Mock(returncode=0, stdout="{}", stderr="")]
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
                 self.assertEqual(dispatcher.dispatch_direct_child_pending(), [marker.stem])
-            self.assertEqual(command.call_args_list[1].args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-journey"])
+            self.assertEqual(command.call_args_list[1].args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-recursion-direct-child"])
             self.assertNotIn("create", command.call_args_list[0].args[0])
             self.assertTrue(json.loads(marker.read_text())["dispatched"])
 
@@ -271,6 +273,47 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertEqual(dispatcher._adopt_direct_child_bead("/city", "my-project", marker), (False, None))
         self.assertIn("--all", command.call_args.args[0])
         self.assertIn("--limit", command.call_args.args[0])
+
+    def test_completed_direct_child_is_projected_until_followup_pr_is_settled(self) -> None:
+        """Catches completion being persisted without running the Pack publisher."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            marker_path = root / "direct-child-dispatch" / ("d" * 64 + ".json")
+            marker_path.parent.mkdir()
+            direct_child = {"key": "github-pr-docs-child:" + "d" * 64}
+            admission = {"schema_version": 1, "kind": "github-docs-recursion-direct-admission", "recursion_identity": "github-docs-recursion:17:test", "admitted_child": direct_child}
+            marker = {"admission": admission, "direct_child": direct_child, "bead_id": "bead-direct", "dispatched": True}
+            marker_path.write_text(json.dumps(marker))
+            update = {"schema_version": 1, "kind": "github-docs-recursion-direct-child-update", "admitted_child": direct_child, "state": "complete", "documentation_branch": {"branch": "gas-city/docs", "commit_sha": "b" * 40, "evidence": ["docs/guide.md"]}}
+            commands = [
+                mock.Mock(returncode=0, stdout=json.dumps({"status": "closed", "metadata": {"github.docs_direct_child.result": json.dumps(update)}}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"identity": admission["recursion_identity"]}, "action": {"kind": "create_docs_pr"}}), stderr=""),
+                mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete"}}), stderr=""),
+            ]
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
+                self.assertEqual(dispatcher.harvest_direct_child_updates(), [marker_path.stem])
+
+            self.assertEqual(command.call_count, 3)
+            self.assertIn("github_intake_docs_direct_child_complete.py", command.call_args_list[1].args[0][1])
+            self.assertIn("github_intake_docs_journey_commands.py", command.call_args_list[2].args[0][1])
+            self.assertIn("project-until-settled", command.call_args_list[2].args[0])
+            self.assertEqual(command.call_args_list[2].args[0][-1], admission["recursion_identity"])
+            self.assertEqual(json.loads(marker_path.read_text())["dispatched"], "published")
+
+    def test_legacy_journey_marker_uses_legacy_agent_in_direct_child_rig(self) -> None:
+        """Catches stored legacy work being sent to the incompatible direct agent."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            marker_path = root / "journey-dispatch" / ("d" * 64 + ".json")
+            marker_path.parent.mkdir()
+            admitted = {"source_key": "legacy"}
+            marker_path.write_text(json.dumps({"bead_id": "legacy-bead", "child_key": "legacy-child", "journey_identity": "github-docs-journey:17:test", "admitted_child": admitted, "dispatched": False}))
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child"}
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="{}", stderr="")) as command:
+                self.assertEqual(dispatcher.dispatch_journey_pending(), [marker_path.stem])
+
+            self.assertEqual(command.call_args.args[0][:5], ["gc", "--city", "/city", "sling", "my-project/github-docs-impact.docs-journey"])
 
     def test_city_dispatcher_records_one_completed_journey_worker_update(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -285,7 +328,7 @@ class CandidateBridgeTests(unittest.TestCase):
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"children": [{"key": "child-1", "state": "complete"}]}}), stderr=""),
                 mock.Mock(returncode=0, stdout=json.dumps({"journey": {"state": "baseline-complete", "actions": [{"kind": "create_docs_pr", "state": "completed"}]}}), stderr=""),
             ]
-            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-journey", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
+            environment = {"GC_CITY_DOCS_REVIEW_DIR": str(root), "CITY_PATH": "/city", "GC_CITY_DOCS_DIRECT_CHILD_TARGET": "my-project/github-docs-impact.docs-recursion-direct-child", "GC_GITHUB_PACK_SCRIPTS": "/pack/scripts"}
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(dispatcher.subprocess, "run", side_effect=commands) as command:
                 self.assertEqual(dispatcher.harvest_journey_updates(), [marker.stem])
             self.assertEqual(command.call_count, 3)

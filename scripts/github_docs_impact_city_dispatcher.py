@@ -319,6 +319,15 @@ def harvest_direct_child_updates() -> list[str]:
             published = subprocess.run([sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(review_dir / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
             if published.returncode:
                 continue
+            projected = subprocess.run(
+                [sys.executable, f"{pack_scripts}/github_intake_docs_journey_commands.py",
+                 "project-until-settled", "--once", "--store", str(review_dir / "journeys"),
+                 "--identity", marker["admission"]["recursion_identity"]],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if projected.returncode:
+                continue
             _atomic_write(marker_path, json.dumps({**marker, "dispatched": "published"}, sort_keys=True, separators=(",", ":")).encode())
             handed_off.append(marker_path.stem)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
@@ -346,8 +355,9 @@ def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
 
 
 def _journey_target() -> str:
-    """Adopt persisted legacy work through the current direct-child worker."""
-    return _direct_child_target()[1]
+    """Keep persisted legacy work on the legacy agent in the configured rig."""
+    rig, _ = _direct_child_target()
+    return f"{rig}/github-docs-impact.docs-journey"
 
 
 def dispatch_journey_pending() -> list[str]:

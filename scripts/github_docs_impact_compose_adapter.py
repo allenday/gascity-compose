@@ -279,7 +279,7 @@ def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
     context_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-context" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
     signed_context = json.loads(context_path.read_text(encoding="utf-8"))
     request = _direct_child_request(candidate, review_run["assignment"], signed_context)
-    installation_id = str(os.environ.get("GITHUB_INSTALLATION_ID", "") or signed_context.get("installation_id", "")).strip()
+    installation_id = str(signed_context.get("installation_id", "") or os.environ.get("GITHUB_INSTALLATION_ID", "")).strip()
     if not installation_id:
         config = common.load_effective_config()
         app = config.get("app") if isinstance(config, dict) else {}

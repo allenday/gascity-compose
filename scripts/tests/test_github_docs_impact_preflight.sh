@@ -22,6 +22,7 @@ mkdir -p "$pack/github/scripts" "$pack/github/agents/docs-impact-reviewer" "$pac
 : > "$pack/github/agents/docs-journey/prompt.template.md"
 mkdir -p "$pack/github/agents/docs-recursion-direct-child"
 : > "$pack/github/agents/docs-recursion-direct-child/prompt.template.md"
+: > "$pack/github/agents/docs-recursion-direct-child/agent.toml"
 : > "$auth"
 
 env_file="$temp/github.env"
@@ -31,7 +32,7 @@ MY_PROJECT_DIR=$rig
 GASCITY_SOURCE_DIR=$source
 GC_CITY_DOCS_REVIEW_RIG_DIR=$source
 GC_CITY_DOCS_REVIEW_TARGET=source/github-docs-impact.docs-impact-reviewer
-GC_CITY_DOCS_DIRECT_CHILD_TARGET=source/github-docs-impact.docs-journey
+GC_CITY_DOCS_DIRECT_CHILD_TARGET=source/github-docs-impact.docs-recursion-direct-child
 CODEX_AUTH_FILE=$auth
 CITY_MAIL_LAUNCHER_RIG=my-project
 STACK_PASSWORD=test-password
@@ -78,6 +79,14 @@ grep -q 'github-webhook must not use network_mode: service:city' "$temp/out"
 ENV_FILE="$env_file" sh "$script" >"$temp/out"
 grep -q 'runnable_jobs=0' "$temp/out"
 grep -q 'oldest_runnable_job=none' "$temp/out"
+
+rm "$pack/github/agents/docs-recursion-direct-child/agent.toml"
+if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then
+  echo 'preflight accepted a pack without the direct-child agent manifest' >&2
+  exit 1
+fi
+grep -q 'github/agents/docs-recursion-direct-child/agent.toml' "$temp/out"
+: > "$pack/github/agents/docs-recursion-direct-child/agent.toml"
 
 sed -i 's#GITHUB_PACK_DIR=.*#GITHUB_PACK_DIR=relative-pack#' "$env_file"
 if ENV_FILE="$env_file" sh "$script" >"$temp/out" 2>&1; then

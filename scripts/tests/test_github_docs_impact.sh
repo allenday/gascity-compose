@@ -27,7 +27,7 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 # inputs, so interpolation failures are caught before GitHub Actions runs.
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
-require 'GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact\.docs-journey' "$ci_workflow"
+require 'GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact\.docs-recursion-direct-child' "$ci_workflow"
 if grep -Rqs 'GC_CITY_DOCS_JOURNEY_TARGET' "$root/.github" "$root/compose.yaml" "$root/.env.example" "$root/scripts/github-docs-impact-preflight.sh"; then
   echo 'retired journey target must not remain in CI or preflight configuration' >&2
   exit 1
