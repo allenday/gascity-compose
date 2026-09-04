@@ -47,10 +47,10 @@ services:
         required: false
 
   # GitHub App ingress is opt-in. The worker has no host port: Nginx is the
-  # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
+  # sole HTTP hop and Tailscale Funnel exposes only its webhook path. Its
+  # durable worker owns the complete intake lifecycle independently of City.
   github-webhook:
     profiles: [github-docs-impact]
-    network_mode: "service:city"
     build:
       context: .
       dockerfile: Dockerfile.city
@@ -69,6 +69,7 @@ services:
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
       GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
       GC_HOME: /var/lib/gascity
+      HOME: /var/lib/github-intake/home
       BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
       GC_GITHUB_INTAKE_DIRECT_BD: "1"
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
@@ -88,45 +89,6 @@ services:
       - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       - ./state/github-intake:/var/lib/github-intake
       - ./state/gc-runtime:/var/lib/gascity
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
-  # Deployment adapter for the self-contained reviewer. It owns no listener:
-  # the authenticated webhook service invokes `intake --once`; this loop
-  # accepts City candidates and reconciles interrupted durable runs.
-  github-docs-review-runtime:
-    profiles: [github-docs-impact]
-    image: gascity-github-webhook
-    entrypoint: ["python3", "-u", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "reconcile", "--loop"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    environment:
-      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
-      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /var/lib/gascity
-      BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
-      GC_GITHUB_INTAKE_DIRECT_BD: "1"
-      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      GC_CITY_DOCS_JOURNEY_TARGET: ${GC_CITY_DOCS_JOURNEY_TARGET:?Set GC_CITY_DOCS_JOURNEY_TARGET in .env to the journey worker qualified name}
-      GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
-      GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
-      GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
-      GC_GITHUB_DOCS_RECONCILE_SECONDS: ${GC_GITHUB_DOCS_RECONCILE_SECONDS:-15}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
-      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-      HOME: /var/lib/github-intake/home
-    volumes:
-      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ./:/opt/gascity-compose:ro
-      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/var/lib/gascity
-    network_mode: "service:city"
     security_opt:
       - no-new-privileges:true
     cap_drop:

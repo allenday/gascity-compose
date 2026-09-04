@@ -24,6 +24,45 @@ require_value() {
   printf '%s' "$result"
 }
 
+gateway_status() {
+  python3 - "$state_root/gateway.sqlite" <<'PY'
+import pathlib
+import sqlite3
+import sys
+import time
+
+path = pathlib.Path(sys.argv[1])
+if not path.exists():
+    print("runnable_jobs=0 oldest_runnable_job=none")
+    raise SystemExit(0)
+
+now = int(time.time())
+with sqlite3.connect(path) as connection:
+    try:
+        count = connection.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE status != 'complete' AND available_at <= ?
+              AND (lease_until IS NULL OR lease_until <= ?)
+            """,
+            (now, now),
+        ).fetchone()[0]
+        oldest = connection.execute(
+            """
+            SELECT id FROM jobs
+            WHERE status != 'complete' AND available_at <= ?
+              AND (lease_until IS NULL OR lease_until <= ?)
+            ORDER BY available_at, id LIMIT 1
+            """,
+            (now, now),
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        raise SystemExit(f"gateway status unavailable: {exc}")
+
+print(f"runnable_jobs={count} oldest_runnable_job={oldest[0] if oldest else 'none'}")
+PY
+}
+
 city_dir=$(require_value CITY_DIR)
 pack_dir=$(require_value GITHUB_PACK_DIR)
 app_id=$(value GITHUB_APP_ID)
@@ -66,4 +105,14 @@ raise SystemExit(not all(str(app.get(key, "")).strip() for key in required))
 PY
 fi
 ENV_FILE="$env_file" docker compose --env-file "$env_file" --profile github-docs-impact config --quiet
+compose_config=$(ENV_FILE="$env_file" docker compose --env-file "$env_file" --profile github-docs-impact config)
+if printf '%s\n' "$compose_config" | awk '
+  /^  github-webhook:$/ { inside = 1; next }
+  inside && /^  [^ ]/ { exit }
+  inside && /^    network_mode: service:city$/ { found = 1 }
+  END { exit !found }
+'; then
+  fail 'github-webhook must not use network_mode: service:city'
+fi
+gateway_status
 printf '%s\n' 'github-docs-impact preflight: ready'

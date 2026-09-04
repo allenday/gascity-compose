@@ -12,7 +12,6 @@ require() {
 }
 
 require 'github-webhook:' "$compose"
-require 'github-docs-review-runtime:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -29,7 +28,7 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
 require 'GC_CITY_DOCS_JOURNEY_TARGET: my-project/github-docs-impact\.docs-journey' "$ci_workflow"
-require 'city:8080' "$root/nginx/nginx.conf"
+require 'github-webhook:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
 require 'action = "reopened"' "$rules"
@@ -47,8 +46,6 @@ if awk '/^  github-webhook:/{inside=1; next} inside && /^  [^ ]/{exit} inside &&
   exit 1
 fi
 
-runtime_block=$(awk '/^  github-docs-review-runtime:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-review-runtime:/{exit}' "$compose")
-[ -n "$runtime_block" ] || { echo 'github-docs-review-runtime service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
 reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
@@ -65,37 +62,6 @@ require_webhook() {
     exit 1
   }
 }
-
-require_runtime() {
-  pattern=$1
-  printf '%s\n' "$runtime_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-docs-review-runtime" >&2
-    exit 1
-  }
-}
-
-forbid_runtime() {
-  pattern=$1
-  if printf '%s\n' "$runtime_block" | grep -Eq "$pattern"; then
-    echo "forbidden $pattern in github-docs-review-runtime" >&2
-    exit 1
-  fi
-}
-
-# The runtime owns the durable record, GitHub App projection, candidate bridge,
-# and reconciliation. It has no listener; webhook ingress remains separate.
-require_runtime 'github_docs_impact_compose_adapter.py.*reconcile.*--loop'
-require_runtime 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
-require_runtime 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
-require_runtime 'GC_CITY_DOCS_JOURNEY_TARGET:.*GC_CITY_DOCS_JOURNEY_TARGET'
-require_runtime 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
-require_runtime 'BEADS_DIR:.*CITY_DIR.*\.beads'
-require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
-require_runtime 'network_mode: "service:city"'
-require_runtime 'restart: unless-stopped'
-require_runtime 'GC_HOME: /var/lib/gascity'
-require_runtime 'state/gc-runtime:/var/lib/gascity'
-forbid_runtime '^    ports:'
 
 require_city() {
   pattern=$1
@@ -164,7 +130,7 @@ fi
 # profile-gated, so this does not weaken the one-supervisor-at-a-time guard.
 require '^    profiles: \[city, github-docs-impact\]$' "$compose"
 profile_services=$(docker compose --env-file "$root/.env.example" --profile github-docs-impact config --services)
-for expected in city github-webhook github-docs-review-runtime; do
+for expected in city github-webhook; do
   printf '%s\n' "$profile_services" | grep -Fx "$expected" >/dev/null || {
     echo "github-docs-impact profile does not activate $expected" >&2
     exit 1
@@ -179,7 +145,10 @@ require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
 require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
 require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
 require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
-require_webhook 'network_mode: "service:city"'
+if printf '%s\n' "$webhook_block" | grep -Eq 'network_mode: "service:city"'; then
+  echo 'github-webhook must not share City network mode' >&2
+  exit 1
+fi
 require_webhook 'GC_HOME: /var/lib/gascity'
 require_webhook 'state/gc-runtime:/var/lib/gascity'
 require_webhook 'github_docs_impact_webhook.py'
