@@ -445,42 +445,6 @@ def _original_check_outcome(journey: dict[str, object]) -> str:
     return "pending" if docs_pr else "action_required"
 
 
-def _terminalize_original_check(marker: dict[str, object], journey: dict[str, object]) -> bool:
-    """Persist and project only a genuine journey failure to the source Check."""
-    if _original_check_outcome(journey) != "action_required":
-        return False
-    admitted = marker.get("admitted_child")
-    source_key = admitted.get("source_key") if isinstance(admitted, dict) else None
-    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
-    if not isinstance(source_key, str) or not source_key or not review_dir:
-        raise ValueError("journey marker lacks original review source")
-    config = common.load_effective_config()
-    app = config.get("app") if isinstance(config, dict) else None
-    installation_id = os.environ.get("GITHUB_INSTALLATION_ID", "") or (app or {}).get("installation_id", "")
-    if not isinstance(app, dict) or not str(installation_id).strip():
-        raise ValueError("GitHub App configuration is unavailable for journey terminal status")
-    store = review_runtime.FileDocsReviewStore(review_dir)
-    with store.lock(source_key):
-        record = store.load(source_key)
-        if record is None:
-            raise ValueError("journey source review run was not found")
-        if record.get("state") == "terminal" and record.get("conclusion") == "action_required":
-            return True
-        if record.get("state") != "journey-pending":
-            return False
-        record["state"] = "terminal"
-        record["conclusion"] = "action_required"
-        record["pending_actions"] = ["ensure_terminal_check"]
-        record["journey"] = {"identity": marker.get("journey_identity"), "state": journey.get("state")}
-        store.save(record)
-        gateway = impact.GitHubAppProjectionGateway(app, str(installation_id))
-        projection = impact.AppProjection(store, gateway)
-        projection.perform("ensure_terminal_check", record)
-        record["pending_actions"] = []
-        store.save(record)
-    return True
-
-
 def _journey_update_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
     """Recover one final worker update without trusting surrounding prose."""
     output = peek.get("output")
