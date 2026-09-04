@@ -194,12 +194,13 @@ def _delivery(payload: dict[str, Any]) -> dict[str, Any]:
         "repository": str(repository.get("full_name", "")),
         "pr_number": pull.get("number"),
         "head_sha": str(head.get("sha", "")).lower(),
+        "head_ref": str(head.get("ref", "")),
         "base_sha": str(base.get("sha", "")).lower(),
         "base_ref": str(base.get("ref", "")),
         "head_repository_id": str(head_repo.get("id", "")),
         "head_repository": str(head_repo.get("full_name", "")),
     }
-    if not all(result[key] for key in ("repository_id", "repository", "head_sha", "base_sha", "base_ref", "head_repository_id", "head_repository")) or type(result["pr_number"]) is not int:
+    if not all(result[key] for key in ("repository_id", "repository", "head_sha", "head_ref", "base_sha", "base_ref", "head_repository_id", "head_repository")) or type(result["pr_number"]) is not int:
         raise ValueError("pull_request webhook lacks immutable identity")
     if str(base_repo.get("id", "")) != result["repository_id"] or str(base_repo.get("full_name", "")) != result["repository"]:
         raise ValueError("pull_request base repository does not match webhook repository")
@@ -238,14 +239,17 @@ def _journey_request(candidate: dict[str, Any], assignment: dict[str, Any], inst
     pr_number = identity.get("pr_number")
     head_sha = str(identity.get("head_sha") or "").lower()
     source_key = str(identity.get("source_key") or "")
-    default_branch = str(proposal_identity.get("base_ref") or "")
-    if not repository_id or not repository or type(pr_number) is not int or not head_sha or not source_key or not default_branch:
+    followup_base = str(evidence_bundle.get("source_head_ref") or "") if isinstance(evidence_bundle, dict) else ""
+    if not repository_id or not repository or type(pr_number) is not int or not head_sha or not source_key or not followup_base:
         raise ValueError("docs-change candidate lacks immutable review identity")
     return {
         "repository_id": repository_id,
         "repository": repository,
         "installation_id": installation_id,
-        "default_branch": default_branch,
+        # This is the reviewed source branch, not the PR's base branch.  The
+        # worker's docs PR must merge into the contributor's revision so its
+        # merge creates a new source SHA and re-runs the original Check.
+        "default_branch": followup_base,
         "default_branch_sha": head_sha,
         "source": {
             "kind": "github-pull-request",

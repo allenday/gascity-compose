@@ -67,7 +67,7 @@ def assignment() -> dict[str, object]:
         "kind": "github-pr-docs-impact-assignment",
         "identity": {"repository_id": "17", "repository": "example/docs", "pr_number": 9, "head_sha": SHA, "source_key": f"github-pr:17:9:{SHA}"},
         "agent_skill": "developer-experience-techdocs",
-        "evidence_bundle": {"head_sha": SHA, "proposal_identity": {"repository_id": "17", "repository": "example/docs", "pr_number": 9, "base_sha": "b" * 40, "head_sha": SHA, "head_repository_id": "17", "head_repository": "example/docs", "base_ref": "main"}, "files": [{"path": "docs/guide.md", "reference": f"github://example/docs/blob/{SHA}/docs/guide.md", "patch": "@@ -1 +1 @@\n-old\n+new\n"}]},
+        "evidence_bundle": {"head_sha": SHA, "source_head_ref": "feature/docs-change", "proposal_identity": {"repository_id": "17", "repository": "example/docs", "pr_number": 9, "base_sha": "b" * 40, "head_sha": SHA, "head_repository_id": "17", "head_repository": "example/docs", "base_ref": "main"}, "files": [{"path": "docs/guide.md", "reference": f"github://example/docs/blob/{SHA}/docs/guide.md", "patch": "@@ -1 +1 @@\n-old\n+new\n"}]},
     }
 
 
@@ -99,7 +99,7 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(request["docs_impact_source_key"], assignment()["identity"]["source_key"])
         self.assertEqual(request["source"]["kind"], "github-pull-request")
         self.assertEqual(request["source"]["url"], "https://github.com/example/docs/pull/9")
-        self.assertEqual(request["default_branch"], "main")
+        self.assertEqual(request["default_branch"], "feature/docs-change")
         self.assertEqual(request["default_branch_sha"], SHA)
 
     def test_docs_change_candidate_is_admitted_projected_then_queued_for_city(self) -> None:
