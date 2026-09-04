@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the special-case documentation journey controller with one bounded recursion whose GitHub projections are checks, bot follow-up pull requests, and inert deferred issues.
+**Goal:** Replace the special-case documentation journey controller with one recursion that records every affected documentation cell and projects checks, bot follow-up pull requests, and inert deferred issues.
 
 **Architecture:** `gascity-packs` owns the versioned recursion record, its guarded admission/activation transitions, and GitHub/City projections. `gascity-compose` retains the signed durable gateway and turns a SHA-bound PR decision directly into one credential-free City docs worker, then lets the GitHub App publish the worker's validated follow-up. GitHub is the human-visible record; the City execution graph remains internal.
 
@@ -13,9 +13,10 @@
 ## Global constraints
 
 - Every incoming context is `github-pull-request`, `github-issue`, or `operator-request`; no context receives a special workflow.
-- Persist an immutable context and declared persona-goal path before a worker or GitHub projection.
+- Persist an immutable context and declared coverage collection of persona, goal, and documentation-type cells before a worker or GitHub projection.
 - A PR context permits at most one child and one bot-owned follow-up PR, targeted to the reviewed source branch.
-- A deferred gap is an inert, idempotently projected GitHub issue. It cannot create a Bead, worker, branch, PR, or descendant until explicit human activation supplies a new context.
+- Every uncovered affected cell is an inert, idempotently projected GitHub issue. It cannot create a Bead, worker, branch, PR, or descendant until explicit human activation supplies a new context.
+- Buds do not consume any execution budget. On replay, create the issue only once and append current source/evidence to the existing issue instead.
 - Preserve durable gateway delivery identity, SHA binding, retry/reconciliation, credential-free City workers, and GitHub App-only publishing.
 - Keep v1/v2 stored journey records readable and adopt their existing external resources until terminal; new writes use only the recursion contract.
 - No author-branch mutation, direct main write, automatic merge, or hand-rolled secret scanner.
@@ -48,12 +49,12 @@ flowchart LR
 **Interfaces:**
 
 - Consumes: validated `github-pr-docs-impact-review` artifact and a normalized incoming context.
-- Produces: persisted recursion record with `identity`, `context`, `persona_goal_path`, `budgets`, `children`, `buds`, `actions`, and `state`.
+- Produces: persisted recursion record with `identity`, `context`, `coverage_cells`, `execution_budgets`, `children`, `buds`, `actions`, and `state`.
 - Produces: commands `start-or-admit`, `activate-bud`, `record-child-update`, and `project-until-settled`.
 
 - [ ] **Step 1: Write failing contract tests.**
 
-  Add fixtures for all three context kinds. Assert identical record shape and state transitions for a path-blocking gap. Add a test that an adjacent gap creates a bud action but no child action. Add a test that `activate-bud` accepts only the recorded bud identity and a new explicit context.
+  Add fixtures for all three context kinds. Assert identical record shape and state transitions for a path-blocking cell. Add a multi-cell test where a worker covers one cell and every uncovered cell creates a bud action but no child action. Add a test that `activate-bud` accepts only the recorded bud identity and a new explicit context.
 
 - [ ] **Step 2: Run the focused Pack tests and verify the expected failure.**
 
@@ -63,11 +64,11 @@ flowchart LR
   python3 -m unittest github.tests.test_github_docs_bootstrap github.tests.test_github_docs_journey_commands -v
   ```
 
-  Expected: failures because the record lacks normalized `context` and `persona_goal_path`, and there is no guarded bud-activation command.
+  Expected: failures because the record lacks normalized `context` and `coverage_cells`, cannot record each uncovered cell, and has no guarded bud-activation command.
 
 - [ ] **Step 3: Implement the minimal versioned recursion record and transitions.**
 
-  Add a single normalization function that validates the context, persona-goal path, and budgets. Make admission return exactly one of `sufficient`, `human-review-required`, `child-admitted`, or `bud-recorded`. Make bud activation construct a fresh record; it must never mutate an old bud into executable work. Retain read/adoption paths for legacy stored data without emitting legacy fields in newly created records.
+  Add a single normalization function that validates the context, coverage cells, and execution budgets. Record a result for every cell: sufficient, covered by active work, or bud-recorded. Bud creation must not decrement or be capped by execution budgets. Make bud activation construct a fresh record; it must never mutate an old bud into executable work. Retain read/adoption paths for legacy stored data without emitting legacy fields in newly created records.
 
 - [ ] **Step 4: Re-run focused tests and then the Pack GitHub suite.**
 
@@ -78,7 +79,7 @@ flowchart LR
   python3 -m unittest discover -s github/tests -v
   ```
 
-  Expected: all tests pass, including replay, stale-snapshot, duplicate-admission, budget, and inert-bud cases.
+  Expected: all tests pass, including replay, stale-snapshot, duplicate-admission, active-work budget, unlimited bud, and inert-bud cases.
 
 - [ ] **Step 5: Commit the Pack contract change.**
 
@@ -103,12 +104,12 @@ flowchart LR
 **Interfaces:**
 
 - Consumes: Task 1's `child-admitted` or `bud-recorded` action.
-- Produces: at most one City Bead and one bot-owned PR for an admitted child; exactly one idempotent GitHub issue for a bud.
-- Produces: human-readable issue body headed by the persona-goal path, with provenance retained in logical markers/metadata.
+- Produces: at most one City Bead and one bot-owned PR for an admitted child; exactly one idempotent GitHub issue for every unresolved coverage cell.
+- Produces: human-readable issue body headed by the persona-goal-doc-type cell, with provenance retained in logical markers/metadata and current evidence appended on replay.
 
 - [ ] **Step 1: Write failing projection tests.**
 
-  Assert an admitted PR-context child creates no GitHub tracking issue before it has a worker result. Assert a bud creates one GitHub issue containing the persona-goal path and creates no Bead/PR. Assert a duplicate projection adopts existing resources by logical identity. Assert an activation of that issue is the only route that creates a new work item.
+  Assert an admitted PR-context child creates no GitHub tracking issue before it has a worker result. Assert every unresolved cell creates one GitHub issue containing its persona-goal-doc-type cell and creates no Bead/PR. Assert a duplicate projection adopts the existing issue and appends current evidence rather than creating another. Assert an activation of that issue is the only route that creates a new work item.
 
 - [ ] **Step 2: Run focused projection tests and verify the expected failure.**
 
@@ -122,7 +123,7 @@ flowchart LR
 
 - [ ] **Step 3: Implement projection rules and worker contract.**
 
-  Keep the controller as the only GitHub publisher. For PR context, project a direct City child from the immutable reviewed SHA and publish its validated branch as one follow-up PR. For a bud, create only the idempotent GitHub issue. Update the worker prompt to return a branch/commit/evidence result; it never opens or merges a PR. Add the explicit activation command/label handling that creates a new normalized context.
+  Keep the controller as the only GitHub publisher. For PR context, project a direct City child from the immutable reviewed SHA and publish its validated branch as one follow-up PR. For every unresolved cell, create or update only the idempotent GitHub issue. Update the worker prompt to return a branch/commit/evidence result; it never opens or merges a PR. Add the explicit activation command/label handling that creates a new normalized context.
 
 - [ ] **Step 4: Run focused and full Pack tests.**
 
@@ -133,7 +134,7 @@ flowchart LR
   python3 -m unittest discover -s github/tests -v
   ```
 
-  Expected: all tests pass; PR path has one follow-up maximum and bud path remains non-executing until activation.
+  Expected: all tests pass; PR path has one follow-up maximum, every unresolved cell has one observable issue, and those issues remain non-executing until activation.
 
 - [ ] **Step 5: Commit the Pack projection change.**
 
@@ -164,7 +165,7 @@ flowchart LR
 
 - [ ] **Step 1: Write failing Compose tests.**
 
-  Add a test that a PR `docs-change-required` candidate persists one direct-child request and does not invoke `github_intake_docs_journey_commands.py`, create a GitHub issue, or write a `journey-dispatch` marker. Add a replay test proving the same candidate yields the same direct child and no duplicate follow-up intent.
+  Add a test that a PR `docs-change-required` candidate persists one direct-child request and does not invoke `github_intake_docs_journey_commands.py`, create a relay-only GitHub tracking issue, or write a `journey-dispatch` marker. Add a replay test proving the same candidate yields the same direct child and no duplicate follow-up intent.
 
 - [ ] **Step 2: Run the focused Compose test and verify the expected failure.**
 
@@ -178,7 +179,7 @@ flowchart LR
 
 - [ ] **Step 3: Implement direct PR child persistence, dispatch, and harvesting.**
 
-  Replace `_admit_docs_journey` and the journey-only dispatcher methods with a direct-child marker that echoes candidate identity, source key, SHA, persona-goal path, and bounded budget. Dispatch only that persisted marker from the City-local process. Reuse Task 2's result validation and publisher contract; do not grant GitHub credentials to the City worker. Remove Compose environment and profile requirements that exist solely for the old controller path.
+  Replace `_admit_docs_journey` and the journey-only dispatcher methods with a direct-child marker that echoes candidate identity, source key, SHA, coverage cells, and bounded active-work budget. Dispatch only that persisted marker from the City-local process. Reuse Task 2's result validation and publisher contract; do not grant GitHub credentials to the City worker. Remove Compose environment and profile requirements that exist solely for the old controller path.
 
 - [ ] **Step 4: Run Compose unit, durable-gateway, and profile checks.**
 
@@ -216,7 +217,7 @@ flowchart LR
 
 - [ ] **Step 1: Write failing end-to-end fixture assertions.**
 
-  Extend the smoke fixture to assert four externally visible outcomes: documentation sufficient passes; an inconclusive result requires human review; a safe PR gap creates one stacked bot follow-up with the original check pending; an adjacent gap creates one issue and no execution artifact until an explicit activation fixture is supplied.
+  Extend the smoke fixture to assert four externally visible outcomes: documentation sufficient passes; an inconclusive result requires human review; a safe PR gap creates one stacked bot follow-up with the original check pending; every uncovered cell creates or updates one issue and no execution artifact until an explicit activation fixture is supplied.
 
 - [ ] **Step 2: Run the smoke test and verify the expected failure.**
 
@@ -253,6 +254,6 @@ flowchart LR
 
 ## Plan self-review
 
-- Spec coverage: Tasks 1–2 implement the one-recursion and inert-bud rules; Task 3 removes the PR-only controller hop while retaining durable gateway boundaries; Task 4 validates and documents every external projection.
+- Spec coverage: Tasks 1–2 implement the one-recursion, full-coverage, and non-costing inert-bud rules; Task 3 removes the PR-only controller hop while retaining durable gateway boundaries; Task 4 validates and documents every external projection.
 - Dependency coverage: Task 2 and Task 3 may begin after Task 1 exposes its interface, but Task 4 cannot enter final critique until both are complete.
 - Placeholder scan: every task names exact files, inputs/outputs, failing tests, expected failure, verification commands, and commit scope.
