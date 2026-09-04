@@ -17,7 +17,7 @@
 - A PR context permits at most one child and one bot-owned follow-up PR, targeted to the reviewed source branch.
 - Every uncovered affected cell is an inert, idempotently projected GitHub issue. It cannot create a Bead, worker, branch, PR, or descendant until explicit human activation supplies a new context.
 - Buds do not consume any execution budget. On replay, create the issue only once and append current source/evidence to the existing issue instead.
-- Preserve durable gateway delivery identity, SHA binding, retry/reconciliation, credential-free City workers, and GitHub App-only publishing.
+- Preserve durable gateway delivery identity, SHA binding, retry/reconciliation, credential-free City workers, and GitHub App-only publishing. A worker returns a bounded, content-addressed documentation patch against its immutable reviewed snapshot; it never claims a remote branch or commit. The App validates, applies, commits, pushes, and verifies the sole App-owned branch.
 - Keep v1/v2 stored journey records readable and adopt their existing external resources until terminal; new writes use only the recursion contract.
 - No author-branch mutation, direct main write, automatic merge, or hand-rolled secret scanner.
 
@@ -123,7 +123,7 @@ flowchart LR
 
 - [ ] **Step 3: Implement projection rules and worker contract.**
 
-  Keep the controller as the only GitHub publisher. For PR context, project a direct City child from the immutable reviewed SHA and publish its validated branch as one follow-up PR. For every unresolved cell, create or update only the idempotent GitHub issue. Update the worker prompt to return a branch/commit/evidence result; it never opens or merges a PR. Add the explicit activation command/label handling that creates a new normalized context.
+  Keep the controller as the only GitHub publisher. For PR context, project a direct City child from the immutable reviewed SHA and publish one follow-up PR. The credential-free worker receives only a read-only exact-SHA snapshot and returns a bounded, content-addressed documentation patch plus evidence. The App validates its hash, scope, and clean application, commits and pushes the derived App-owned branch, verifies the remote ref, and only then creates or adopts the PR. For every unresolved cell, create or update only the idempotent GitHub issue. Add the explicit activation command/label handling that creates a new normalized context.
 
 - [ ] **Step 4: Run focused and full Pack tests.**
 
@@ -159,8 +159,8 @@ flowchart LR
 
 **Interfaces:**
 
-- Consumes: a SHA-bound `docs-change-required` candidate and Task 2's persisted direct-child admission contract.
-- Produces: one durable direct-child dispatch marker keyed by the candidate digest and one validated worker result for the App publisher.
+- Consumes: a SHA-bound `docs-change-required` candidate and Task 2's direct-child contract.
+- Produces: one durable direct-child dispatch marker keyed by the candidate digest, one immutable read-only reviewed snapshot, and one validated bounded patch artifact for the App publisher.
 - Removes: PR-path use of `GC_CITY_DOCS_JOURNEY_TARGET`, `journey-dispatch`, and generic controller command invocations.
 
 - [ ] **Step 1: Write failing Compose tests.**
@@ -179,7 +179,7 @@ flowchart LR
 
 - [ ] **Step 3: Implement direct PR child persistence, dispatch, and harvesting.**
 
-  Replace `_admit_docs_journey` and the journey-only dispatcher methods with a direct-child marker that echoes candidate identity, source key, SHA, coverage cells, and bounded active-work budget. Dispatch only that persisted marker from the City-local process. Reuse Task 2's result validation and publisher contract; do not grant GitHub credentials to the City worker. Remove Compose environment and profile requirements that exist solely for the old controller path.
+  Replace `_admit_docs_journey` and the journey-only dispatcher methods with a direct-child marker that echoes candidate identity, source key, SHA, coverage cells, and bounded active-work budget. Stage a separate read-only exact-SHA snapshot, not nested in any City-writable review directory. Dispatch only that persisted marker and snapshot descriptor from the City-local process. Harvest a bounded patch artifact, then reuse Task 2's App-side validation, commit, push, verification, and publisher contract; do not grant GitHub credentials to the City worker. Remove Compose environment and profile requirements that exist solely for the old controller path.
 
 - [ ] **Step 4: Run Compose unit, durable-gateway, and profile checks.**
 
