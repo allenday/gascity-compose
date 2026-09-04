@@ -191,20 +191,20 @@ def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None
     return marker
 
 
-def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> str | None:
+def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> tuple[bool, str | None]:
     """Find the City Bead created before a crash could record its ID."""
     result = subprocess.run(
-        ["gc", "--city", city, "--rig", rig, "bd", "list", "--label", "github-docs-impact", "--json"],
+        ["gc", "--city", city, "--rig", rig, "bd", "list", "--label", "github-docs-impact", "--all", "--limit", "0", "--json"],
         capture_output=True, text=True, check=False, timeout=20,
     )
     if result.returncode:
-        return None
+        return False, None
     try:
         values = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return None
+        return False, None
     if not isinstance(values, list):
-        return None
+        return False, None
     expected = marker.get("direct_child")
     for value in values:
         metadata = value.get("metadata") if isinstance(value, dict) else None
@@ -215,8 +215,8 @@ def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> 
             continue
         bead_id = value.get("id") if isinstance(value, dict) else None
         if recorded == expected and isinstance(bead_id, str) and bead_id:
-            return bead_id
-    return None
+            return True, bead_id
+    return True, None
 
 
 def dispatch_direct_child_pending() -> list[str]:
@@ -232,7 +232,12 @@ def dispatch_direct_child_pending() -> list[str]:
         if marker is None:
             continue
         if marker["bead_id"] is None:
-            bead_id = _adopt_direct_child_bead(city, rig, marker)
+            lookup_complete, bead_id = _adopt_direct_child_bead(city, rig, marker)
+            if not lookup_complete:
+                # A create-before-marker crash is indistinguishable from an
+                # unavailable or truncated lookup. Never spend the one-child
+                # budget until City has supplied a complete adoption view.
+                continue
             if bead_id is None:
                 metadata = json.dumps({"github.docs_direct_child": marker["direct_child"]}, sort_keys=True, separators=(",", ":"))
                 created = subprocess.run(

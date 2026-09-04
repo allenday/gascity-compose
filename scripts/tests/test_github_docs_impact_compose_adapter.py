@@ -254,6 +254,15 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertNotIn("create", command.call_args_list[0].args[0])
             self.assertTrue(json.loads(marker.read_text())["dispatched"])
 
+    def test_direct_child_adoption_failure_is_not_treated_as_permission_to_create(self) -> None:
+        """Catches a transient City lookup duplicating a child after a crash."""
+        marker = {"direct_child": {"key": "github-pr-docs-child:deadbeef"}}
+        failed = mock.Mock(returncode=1, stdout="", stderr="City unavailable")
+        with mock.patch.object(dispatcher.subprocess, "run", return_value=failed) as command:
+            self.assertEqual(dispatcher._adopt_direct_child_bead("/city", "my-project", marker), (False, None))
+        self.assertIn("--all", command.call_args.args[0])
+        self.assertIn("--limit", command.call_args.args[0])
+
     def test_city_dispatcher_records_one_completed_journey_worker_update(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -285,6 +294,13 @@ class CandidateBridgeTests(unittest.TestCase):
         self.assertEqual(dispatcher._original_check_outcome({"state": "baseline-complete", "actions": [{"kind": "create_docs_pr", "state": "completed"}]}), "pending")
         self.assertEqual(dispatcher._original_check_outcome({"state": "baseline-complete", "actions": []}), "action_required")
         self.assertEqual(dispatcher._original_check_outcome({"state": "budget-exhausted", "actions": []}), "action_required")
+
+    def test_dispatcher_normal_loop_reconciles_persisted_legacy_journeys(self) -> None:
+        """Catches an upgrade silently stranding a pre-existing journey marker."""
+        with mock.patch.object(dispatcher, "retire_superseded", return_value=[]), mock.patch.object(dispatcher, "create_pending", return_value=[]), mock.patch.object(dispatcher, "dispatch_pending", return_value=[]), mock.patch.object(dispatcher, "dispatch_direct_child_pending", return_value=[]), mock.patch.object(dispatcher, "harvest_direct_child_updates", return_value=[]), mock.patch.object(dispatcher, "dispatch_journey_pending", return_value=["legacy"] ) as dispatch_legacy, mock.patch.object(dispatcher, "harvest_journey_updates", return_value=["legacy"]) as harvest_legacy, mock.patch.object(dispatcher, "export_transcripts", return_value=[]), mock.patch.object(sys, "argv", ["dispatcher", "--once"]):
+            self.assertEqual(dispatcher.main(), 0)
+        dispatch_legacy.assert_called_once_with()
+        harvest_legacy.assert_called_once_with()
 
     def test_city_dispatcher_creates_review_work_in_the_target_rig(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
