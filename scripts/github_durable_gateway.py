@@ -277,8 +277,16 @@ class GatewayStore:
                 connection.execute("ROLLBACK")
                 raise
 
-    def advance(self, job_id: int, lease_token: int, next_kind: str | None, now: int) -> bool:
-        """Complete a leased job and durably schedule its successor."""
+    def advance(
+        self,
+        job_id: int,
+        lease_token: int,
+        next_kind: str | None,
+        now: int,
+        *,
+        source_key: str | None = None,
+    ) -> bool:
+        """Complete a leased job, bind its accepted lineage, and schedule its successor."""
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -289,6 +297,11 @@ class GatewayStore:
                 if row is None:
                     connection.execute("COMMIT")
                     return False
+                if source_key is not None:
+                    connection.execute(
+                        "UPDATE deliveries SET source_key = ? WHERE delivery_id = ? AND source_key IS NULL",
+                        (source_key, row[0]),
+                    )
                 connection.execute(
                     "UPDATE jobs SET status = 'complete', lease_until = NULL, completed_at = ? WHERE id = ?",
                     (now, job_id),
@@ -618,7 +631,14 @@ def process_one(
         if retried and health is not None:
             health.failed(failed_at, str(exc))
         return False
-    advanced = store.advance(job.id, job.lease_token, NEXT_JOB_KIND[job.kind], now)
+    accepted_source_key = _source_key(job.payload) if job.kind == "intake" and job.source_key is None else None
+    advanced = store.advance(
+        job.id,
+        job.lease_token,
+        NEXT_JOB_KIND[job.kind],
+        now,
+        source_key=accepted_source_key,
+    )
     if advanced and health is not None:
         health.progressed(now)
     return advanced

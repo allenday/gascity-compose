@@ -384,6 +384,61 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             self.assertIsNone(legacy.source_key)
             self.assertEqual(gateway._reconciliation_source_key(legacy), gateway._legacy_source_key(legacy_payload))
 
+    def test_pre_upgrade_pending_intake_binds_v2_before_its_dispatch_while_old_dispatch_stays_v1(self) -> None:
+        """Catches a v2 intake creating a successor that later reconciles as v1."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            intake_payload = _valid_payload(base_ref="release", base_sha="c" * 40)
+            dispatch_payload = _valid_payload(sha="d" * 40)
+            intake_v2 = gateway._source_key(intake_payload)
+            dispatch_v1 = gateway._legacy_source_key(dispatch_payload)
+            review_root = root / "docs-review"
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+            reconciled: list[tuple[str, str]] = []
+
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                connection.execute(
+                    "INSERT INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ("old-pending-intake", "pull_request", intake_payload, None, 100),
+                )
+                connection.execute(
+                    "INSERT INTO jobs(delivery_id, kind, available_at) VALUES (?, ?, ?)",
+                    ("old-pending-intake", "intake", 100),
+                )
+                connection.execute(
+                    "INSERT INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ("old-dispatch", "pull_request", dispatch_payload, None, 99),
+                )
+                connection.execute(
+                    "INSERT INTO jobs(delivery_id, kind, available_at) VALUES (?, ?, ?)",
+                    ("old-dispatch", "dispatch", 100),
+                )
+
+            def run_adapter(job: gateway.Job) -> dict[str, object]:
+                if job.kind == "intake":
+                    return {}
+                source_key = gateway._reconciliation_source_key(job)
+                reconciled.append((job.delivery_id, source_key))
+                marker = review_root / "dispatch" / f"{job.delivery_id}.json"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"bead_id": job.delivery_id, "source_key": source_key, "dispatched": True}))
+                return {}
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertTrue(gateway.process_one(store, 101))
+                self.assertTrue(gateway.process_one(store, 102))
+
+            self.assertEqual(
+                reconciled,
+                [("old-pending-intake", intake_v2), ("old-dispatch", dispatch_v1)],
+            )
+
     def test_unrelated_pr_edit_is_not_accepted_for_reconciliation(self) -> None:
         payload = _valid_payload(action="edited", changes={"title": {"from": "old title"}})
 
