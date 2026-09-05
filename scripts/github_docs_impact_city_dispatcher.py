@@ -575,13 +575,14 @@ def create_pending() -> list[str]:
 
 
 def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
-    """Recover the one-line canonical review from Codex's wrapped terminal view."""
+    """Recover the final review object or classified envelope from Codex output."""
     output = peek.get("output")
     if not isinstance(output, str):
         return None
     compact = "".join(line.strip() for line in output.splitlines())
     decoder = json.JSONDecoder()
     review: dict[str, object] | None = None
+    classified: dict[str, object] | None = None
     for index, char in enumerate(compact):
         if char != "{":
             continue
@@ -589,10 +590,18 @@ def _review_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
             value, _ = decoder.raw_decode(compact[index:])
         except json.JSONDecodeError:
             continue
-        if isinstance(value, dict) and value.get("kind") == "github-pr-docs-impact-review":
+        if not isinstance(value, dict):
+            continue
+        artifact = value.get("artifact")
+        if (set(value) == {"artifact", "persona_goal_path", "coverage_cells"}
+                and isinstance(artifact, dict)
+                and artifact.get("kind") == "github-pr-docs-impact-review"
+                and artifact.get("verdict") == "docs-change-required"):
+            classified = value
+        elif value.get("kind") == "github-pr-docs-impact-review":
             if value.get("verdict") in {"no-impact", "docs-sufficient", "docs-change-required", "proposal-ready", "inconclusive"}:
                 review = value
-    return review
+    return classified or review
 
 
 def _stored_transcript_matches_source(path: pathlib.Path, source_key: str) -> bool:
@@ -606,7 +615,8 @@ def _stored_transcript_matches_source(path: pathlib.Path, source_key: str) -> bo
             if not isinstance(entry, dict) or entry.get("role") != "assistant":
                 continue
             review = json.loads(entry.get("text")) if isinstance(entry.get("text"), str) else None
-            identity = review.get("identity") if isinstance(review, dict) else None
+            artifact = review.get("artifact") if isinstance(review, dict) and isinstance(review.get("artifact"), dict) else review
+            identity = artifact.get("identity") if isinstance(artifact, dict) else None
             return isinstance(identity, dict) and identity.get("source_key") == source_key
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return False
