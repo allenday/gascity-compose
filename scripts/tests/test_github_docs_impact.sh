@@ -205,7 +205,6 @@ sys.modules[spec.name] = gateway
 spec.loader.exec_module(gateway)
 
 sha = "a" * 40
-source_key = f"github-pr:17:9:{sha}"
 payload = json.dumps({
     "installation": {"id": 17},
     "action": "opened",
@@ -216,6 +215,7 @@ payload = json.dumps({
         "head": {"sha": sha, "ref": "feature/docs", "repo": {"id": 17, "full_name": "example/docs"}},
     },
 }).encode()
+source_key = gateway._source_key(payload)
 
 with tempfile.TemporaryDirectory() as temporary:
     state_root = pathlib.Path(temporary) / "github-intake"

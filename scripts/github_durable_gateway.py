@@ -129,6 +129,7 @@ class Job:
     delivery_id: str
     event: str
     payload: bytes
+    source_key: str | None
     kind: str
     attempts: int
     lease_until: int
@@ -222,6 +223,7 @@ class GatewayStore:
                     delivery_id TEXT PRIMARY KEY,
                     event TEXT NOT NULL,
                     payload BLOB NOT NULL,
+                    source_key TEXT,
                     received_at INTEGER NOT NULL
                 )
                 """
@@ -246,16 +248,23 @@ class GatewayStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             if "lease_token" not in columns:
                 connection.execute("ALTER TABLE jobs ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0")
+            delivery_columns = {row[1] for row in connection.execute("PRAGMA table_info(deliveries)")}
+            if "source_key" not in delivery_columns:
+                connection.execute("ALTER TABLE deliveries ADD COLUMN source_key TEXT")
             connection.execute("CREATE INDEX IF NOT EXISTS jobs_runnable ON jobs(status, available_at, lease_until)")
 
     def enqueue_delivery(self, delivery_id: str, event: str, payload: bytes, now: int) -> bool:
         """Store a verified delivery and its initial job exactly once."""
+        try:
+            source_key = _source_key(payload) if event == "pull_request" else None
+        except InputValidationError:
+            source_key = None
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 inserted = connection.execute(
-                    "INSERT OR IGNORE INTO deliveries(delivery_id, event, payload, received_at) VALUES (?, ?, ?, ?)",
-                    (delivery_id, event, payload, now),
+                    "INSERT OR IGNORE INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    (delivery_id, event, payload, source_key, now),
                 ).rowcount == 1
                 if inserted:
                     connection.execute(
@@ -302,7 +311,7 @@ class GatewayStore:
             try:
                 row = connection.execute(
                     """
-                    SELECT jobs.id, jobs.delivery_id, deliveries.event, deliveries.payload,
+                    SELECT jobs.id, jobs.delivery_id, deliveries.event, deliveries.payload, deliveries.source_key,
                            jobs.kind, jobs.attempts, jobs.lease_token
                     FROM jobs JOIN deliveries USING (delivery_id)
                     WHERE jobs.status IN ('pending', 'leased')
@@ -457,7 +466,7 @@ def _run_adapter(job: Job) -> dict[str, object]:
             payload_path = pathlib.Path(handle.name)
         command.extend(("intake", "--once", "--payload-file", str(payload_path)))
     elif job.kind in {"dispatch", "harvest", "project"}:
-        command.extend(("reconcile", "--once", "--source-key", _source_key(job.payload)))
+        command.extend(("reconcile", "--once", "--source-key", _reconciliation_source_key(job)))
     else:
         raise ValueError(f"unknown gateway job kind: {job.kind}")
     try:
@@ -484,14 +493,38 @@ def _run_adapter(job: Job) -> dict[str, object]:
 
 
 def _source_key(payload: bytes) -> str:
+    """Return the Pack v2 identity for one immutable PR target revision.
+
+    v1 records remain readable by the Pack, but new gateway reconciliation
+    must distinguish an unchanged head retargeted to another base revision.
+    """
     document = validate_pull_request_payload(payload)
     repository = document["repository"]
     pull_request = document["pull_request"]
     head = pull_request["head"]
+    base = pull_request["base"]
     repository_id = str(repository["id"])
     number = pull_request["number"]
     head_sha = str(head["sha"]).lower()
-    return f"github-pr:{repository_id}:{number}:{head_sha}"
+    base_binding = json.dumps(
+        {
+            "base_ref": str(base["ref"]),
+            "base_sha": str(base["sha"]).lower(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return f"github-pr:v2:{repository_id}:{number}:{head_sha}:{hashlib.sha256(base_binding).hexdigest()}"
+
+
+def _legacy_source_key(payload: bytes) -> str:
+    """Return the v1 key retained only to finish pre-upgrade work."""
+    document = validate_pull_request_payload(payload)
+    repository = document["repository"]
+    pull_request = document["pull_request"]
+    head = pull_request["head"]
+    return f"github-pr:{repository['id']}:{pull_request['number']}:{str(head['sha']).lower()}"
 
 
 def _matching_marker(directory: pathlib.Path, source_key: str) -> bool:
@@ -532,11 +565,16 @@ def _projected(review_root: pathlib.Path, source_key: str) -> bool:
     )
 
 
+def _reconciliation_source_key(job: Job) -> str:
+    """Use the lineage captured durably when the delivery entered the inbox."""
+    return job.source_key or _legacy_source_key(job.payload)
+
+
 def _stage_completed(job: Job) -> bool:
     """Require durable evidence rather than treating one poll as completion."""
     if job.kind == "intake":
         return True
-    source_key = _source_key(job.payload)
+    source_key = _reconciliation_source_key(job)
     assignment_root = pathlib.Path(os.environ["GC_GITHUB_DOCS_ASSIGNMENT_DIR"])
     if job.kind == "dispatch":
         return _matching_marker(assignment_root.parent / "dispatch", source_key)
