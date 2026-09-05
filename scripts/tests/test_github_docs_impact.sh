@@ -27,7 +27,11 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 # inputs, so interpolation failures are caught before GitHub Actions runs.
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
-require 'GC_CITY_DOCS_JOURNEY_TARGET: my-project/github-docs-impact\.docs-journey' "$ci_workflow"
+require 'GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact\.docs-recursion-direct-child' "$ci_workflow"
+if grep -Rqs 'GC_CITY_DOCS_JOURNEY_TARGET' "$root/.github" "$root/compose.yaml" "$root/.env.example" "$root/scripts/github-docs-impact-preflight.sh"; then
+  echo 'retired journey target must not remain in CI or preflight configuration' >&2
+  exit 1
+fi
 require 'github-webhook:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
@@ -92,8 +96,12 @@ forbid_city() {
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
-require_city 'GC_CITY_DOCS_JOURNEY_TARGET:.*GC_CITY_DOCS_JOURNEY_TARGET'
-require_city 'docs-review:/var/lib/github-docs-impact/review'
+require_city 'GC_CITY_DOCS_DIRECT_CHILD_TARGET:.*GC_CITY_DOCS_DIRECT_CHILD_TARGET'
+require_city 'GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-docs-impact/snapshots'
+require_city 'GC_CITY_DOCS_DIRECT_RESULT_OUTBOX: /var/lib/github-docs-impact/direct-results'
+require_city 'github-city-docs/review:/var/lib/github-docs-impact/review'
+require_city 'direct-snapshots:/var/lib/github-docs-impact/snapshots:ro'
+require_city 'direct-results:/var/lib/github-docs-impact/direct-results'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 # City runs as HOST_UID:GID, so its supervisor state and real home must not
 # live below /root (which an unprivileged container user cannot traverse).
@@ -149,6 +157,9 @@ done
 # the run, and asks the runtime adapter to dispatch only after that record.
 require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-docs-impact/snapshots'
+require_webhook 'GC_GITHUB_DOCS_DIRECT_RESULT_DIR: /var/lib/github-intake/direct-results'
 require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
 require_webhook 'scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro'
 require_webhook 'scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro'
@@ -162,6 +173,11 @@ require_webhook 'github_docs_impact_webhook.py'
 for forbidden in 'GC_CITY_ROOT:' 'GC_HOME:' 'BEADS_DIR:' 'GC_GITHUB_INTAKE_DIRECT_BD:' 'GC_CITY_DOCS_REVIEW_RIG_DIR:' 'CITY_DIR.*:.*CITY_DIR' 'GC_CITY_DOCS_REVIEW_RIG_DIR.*:.*GC_CITY_DOCS_REVIEW_RIG_DIR' 'state/gc-runtime:/var/lib/gascity' '- \./:/opt/gascity-compose:ro'; do
   forbid_webhook "$forbidden"
 done
+
+if printf '%s\n' "$city_block" | grep -Eq 'state/github-intake:/var/lib/github-intake'; then
+  echo 'city must not mount the complete GitHub intake state' >&2
+  exit 1
+fi
 
 # This local fixture exercises the real durable gateway store while keeping the
 # City and GitHub boundaries deterministic.  It proves that recreating City

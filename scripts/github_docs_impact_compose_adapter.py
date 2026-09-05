@@ -15,10 +15,10 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
 import time
 from typing import Any
 
@@ -39,6 +39,11 @@ def _path_env(name: str) -> pathlib.Path:
     return pathlib.Path(value)
 
 
+def _city_review_dir() -> pathlib.Path:
+    """City-visible handoff state; never a trusted Pack-state parent."""
+    return _path_env("GC_GITHUB_DOCS_CITY_REVIEW_DIR")
+
+
 def _atomic_write(path: pathlib.Path, payload: bytes, mode: int = 0o600) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
@@ -52,6 +57,65 @@ def _atomic_write(path: pathlib.Path, payload: bytes, mode: int = 0o600) -> None
 
 def _assignment_bytes(assignment: dict[str, Any]) -> bytes:
     return json.dumps(assignment, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _is_lower_hex_digest(value: Any) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value))
+
+
+def _trusted_direct_patch_context(value: Any) -> dict[str, Any] | None:
+    required = {"schema_version", "kind", "proposal_identity"}
+    if (not isinstance(value, dict) or set(value) != required
+            or value.get("schema_version") != 1
+            or value.get("kind") != "github-docs-recursion-direct-patch-context"
+            or not isinstance(value.get("proposal_identity"), dict)):
+        return None
+    return value
+
+
+def _trusted_direct_admission(value: Any) -> dict[str, Any] | None:
+    """Accept only the exact Pack admission persisted in a handoff receipt."""
+    required = {
+        "schema_version", "kind", "recursion_identity", "admitted_child",
+        "patch_context",
+    }
+    if (not isinstance(value, dict) or set(value) != required
+            or value.get("schema_version") != 1
+            or value.get("kind") != "github-docs-recursion-direct-admission"
+            or not isinstance(value.get("recursion_identity"), str)
+            or not value["recursion_identity"]
+            or not isinstance(value.get("admitted_child"), dict)
+            or _trusted_direct_patch_context(value.get("patch_context")) is None):
+        return None
+    return value
+
+
+def _trusted_direct_result(receipt: Any, digest: str, payload: Any) -> dict[str, Any] | None:
+    """Validate an untrusted City update before invoking credentialed Pack code."""
+    if (not isinstance(payload, dict) or set(payload) != {"handoff_id", "update"}
+            or payload.get("handoff_id") != digest
+            or not isinstance(receipt, dict)
+            or set(receipt) != {"handoff_id", "candidate_digest", "admission", "consumed"}
+            or receipt.get("handoff_id") != digest
+            or not _is_lower_hex_digest(receipt.get("candidate_digest"))
+            or receipt.get("consumed") is not False):
+        return None
+    admission = _trusted_direct_admission(receipt.get("admission"))
+    update = payload.get("update")
+    fields = {
+        "schema_version", "kind", "admitted_child", "state", "patch_context",
+        "documentation_patch",
+    }
+    if (admission is None or not isinstance(update, dict) or set(update) != fields
+            or update.get("schema_version") != 1
+            or update.get("kind") != "github-docs-recursion-direct-child-update"
+            or update.get("admitted_child") != admission["admitted_child"]
+            or update.get("patch_context") != admission["patch_context"]
+            or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}
+            or (update.get("state") == "complete") != (update.get("documentation_patch") is not None)):
+        return None
+    return admission
 
 
 def _final_assistant_document(transcript: dict[str, Any]) -> dict[str, Any] | None:
@@ -78,14 +142,13 @@ def _candidate_from_transcript(raw_assignment: bytes, transcript: dict[str, Any]
     artifact = _final_assistant_document(transcript)
     if artifact is None:
         return None
-    envelope = {
-        "schema_version": 1,
-        "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(),
-        "artifact": artifact,
-    }
+    envelope = ({"schema_version": 2, "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(), **artifact}
+                if set(artifact) == {"artifact", "persona_goal_path", "coverage_cells"}
+                else {"schema_version": 1, "snapshot_sha256": hashlib.sha256(raw_assignment).hexdigest(), "artifact": artifact})
     try:
         import github_intake_docs_patch_worker as worker
-        return worker.validate_final_candidate(raw_assignment, envelope)
+        validator = worker.validate_direct_admission_candidate if envelope["schema_version"] == 2 else worker.validate_final_candidate
+        return validator(raw_assignment, envelope)
     except ValueError:
         return None
 
@@ -148,9 +211,10 @@ def _harvest_city_candidates(source_key: str | None = None) -> list[str]:
     persisted assignment, then atomically creates the candidate envelope.
     """
     review_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR")
+    city_review = _city_review_dir()
     candidate_root = _path_env("GC_GITHUB_DOCS_CANDIDATE_DIR")
     harvested: list[str] = []
-    for marker_path in sorted((review_root.parent / "dispatch").glob("*.json")):
+    for marker_path in sorted((city_review / "dispatch").glob("*.json")):
         digest = marker_path.stem
         assignment_path = review_root / f"{digest}.json"
         candidate_path = candidate_root / f"{digest}.json"
@@ -165,7 +229,7 @@ def _harvest_city_candidates(source_key: str | None = None) -> list[str]:
             raw_assignment = assignment_path.read_bytes()
             if hashlib.sha256(raw_assignment).hexdigest() != digest:
                 continue
-            transcript_path = review_root.parent / "transcripts" / f"{digest}.json"
+            transcript_path = city_review / "transcripts" / f"{digest}.json"
             transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else {}
             candidate = _candidate_from_transcript(raw_assignment, transcript)
             if candidate is None:
@@ -222,80 +286,139 @@ def _gateway(payload: dict[str, Any] | None = None) -> impact.GitHubAppProjectio
     return impact.GitHubAppProjectionGateway(app, installation_id)
 
 
-def _journey_request(candidate: dict[str, Any], assignment: dict[str, Any], installation_id: str) -> dict[str, Any]:
-    """Normalize one exact blocking review into the docs-journey contract.
+def _snapshot_roots() -> tuple[pathlib.Path, pathlib.PurePosixPath]:
+    """Return trusted staging and City-visible paths for immutable sources."""
+    state_root = _path_env("GC_SERVICE_STATE_ROOT")
+    stage_root = pathlib.Path(os.environ.get("GC_GITHUB_DOCS_SNAPSHOT_DIR", "").strip() or state_root / "direct-snapshots")
+    city_root = pathlib.PurePosixPath(os.environ.get("GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT", "/var/lib/github-intake/direct-snapshots").strip())
+    if not city_root.is_absolute() or ".." in city_root.parts:
+        raise ValueError("GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT must be an absolute safe path")
+    return stage_root, city_root
 
-    The journey snapshot is the reviewed pull-request SHA: it is the only
-    immutable revision the review artifact authorizes.  ``default_branch`` is
-    retained as the eventual follow-up PR base, while the controller validates
-    the admitted child against this reviewed snapshot.
-    """
+
+def _stage_direct_snapshot(request: dict[str, Any], installation_id: str) -> dict[str, Any]:
+    """Checkout the reviewed SHA once in trusted state, never in City review state."""
+    repository_id = str(request.get("repository_id") or "")
+    repository = str(request.get("repository") or "")
+    head_sha = str(request.get("snapshot_sha") or "").lower()
+    if not repository_id or not repository or len(head_sha) != 40 or any(char not in "0123456789abcdef" for char in head_sha):
+        raise ValueError("direct snapshot requires a canonical repository and exact SHA")
+    stage_root, city_root = _snapshot_roots()
+    snapshot_id = hashlib.sha256(f"{repository_id}:{repository}:{head_sha}".encode("utf-8")).hexdigest()
+    checkout = stage_root / snapshot_id
+    city_path = str(city_root / snapshot_id)
+
+    def recorded_snapshot() -> dict[str, Any] | None:
+        try:
+            value = json.loads((checkout / ".gascity-snapshot.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        required = {"schema_version", "kind", "repository_id", "repository", "head_sha", "tree_sha", "path"}
+        if (not isinstance(value, dict) or set(value) != required or value.get("schema_version") != 1
+                or value.get("kind") != "github-pr-source-snapshot"
+                or value.get("repository_id") != repository_id or value.get("repository") != repository
+                or value.get("head_sha") != head_sha or value.get("path") != city_path
+                or not isinstance(value.get("tree_sha"), str) or len(value["tree_sha"]) != 40):
+            return None
+        return value
+
+    existing = recorded_snapshot()
+    if existing is not None:
+        return {key: existing[key] for key in ("schema_version", "kind", "head_sha", "tree_sha", "path")}
+    if checkout.exists():
+        raise ValueError("existing direct snapshot does not match its immutable descriptor")
+    stage_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = pathlib.Path(tempfile.mkdtemp(prefix=".snapshot-", dir=stage_root))
+    try:
+        config = common.load_effective_config()
+        app = config.get("app") if isinstance(config, dict) else None
+        if not isinstance(app, dict):
+            raise ValueError("GitHub App config is unavailable for source snapshot")
+        token = common.create_installation_token(app, installation_id)
+        basic_auth = __import__("base64").b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+        git_env = os.environ.copy()
+        git_env.update({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"http.{common.github_web_base().rstrip('/')}/.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic_auth}",
+        })
+        def git(*arguments: str) -> str:
+            result = subprocess.run(["git", *arguments], cwd=temporary, capture_output=True, text=True, check=False, timeout=90, env=git_env)
+            if result.returncode:
+                raise ValueError(result.stderr.strip() or "could not stage immutable source snapshot")
+            return result.stdout.strip()
+        git("init", "--quiet")
+        git("remote", "add", "origin", common.repository_git_url(repository))
+        git("fetch", "--depth", "1", "origin", head_sha)
+        git("checkout", "--detach", "--quiet", "FETCH_HEAD")
+        if git("rev-parse", "HEAD") != head_sha:
+            raise ValueError("fetched source snapshot does not match the reviewed SHA")
+        tree_sha = git("rev-parse", "HEAD^{tree}")
+        if len(tree_sha) != 40 or any(char not in "0123456789abcdef" for char in tree_sha.lower()):
+            raise ValueError("fetched source snapshot has no immutable tree SHA")
+        descriptor = {
+            "schema_version": 1, "kind": "github-pr-source-snapshot", "repository_id": repository_id,
+            "repository": repository, "head_sha": head_sha, "tree_sha": tree_sha.lower(), "path": city_path,
+        }
+        _atomic_write(temporary / ".gascity-snapshot.json", _assignment_bytes(descriptor), mode=0o400)
+        temporary.replace(checkout)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    descriptor = recorded_snapshot()
+    if descriptor is None:
+        raise ValueError("immutable source snapshot staging did not persist its descriptor")
+    return {key: descriptor[key] for key in ("schema_version", "kind", "head_sha", "tree_sha", "path")}
+
+
+def _direct_child_request(candidate: dict[str, Any], assignment: dict[str, Any], signed_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Normalize one blocking review into the one-child PR recursion contract."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
     identity = artifact.get("identity") if isinstance(artifact, dict) else None
     evidence_bundle = assignment.get("evidence_bundle") if isinstance(assignment, dict) else None
-    proposal_identity = evidence_bundle.get("proposal_identity") if isinstance(evidence_bundle, dict) else None
-    if not isinstance(identity, dict) or not isinstance(proposal_identity, dict):
+    coverage_cells = candidate.get("coverage_cells") if isinstance(candidate, dict) else None
+    if not isinstance(identity, dict) or not isinstance(evidence_bundle, dict):
         raise ValueError("docs-change candidate lacks immutable review identity")
     repository_id = str(identity.get("repository_id") or "")
     repository = str(identity.get("repository") or "")
     pr_number = identity.get("pr_number")
     head_sha = str(identity.get("head_sha") or "").lower()
     source_key = str(identity.get("source_key") or "")
-    followup_base = str(evidence_bundle.get("source_head_ref") or "") if isinstance(evidence_bundle, dict) else ""
-    if not repository_id or not repository or type(pr_number) is not int or not head_sha or not source_key or not followup_base:
+    followup_base = str((signed_context or {}).get("source_branch") or evidence_bundle.get("source_head_ref") or "")
+    if (not repository_id or not repository or type(pr_number) is not int or not head_sha
+            or not source_key or not followup_base or not isinstance(coverage_cells, list)
+            or not coverage_cells or not all(isinstance(cell, dict) for cell in coverage_cells)):
         raise ValueError("docs-change candidate lacks immutable review identity")
+    candidate_digest = hashlib.sha256(_assignment_bytes(candidate)).hexdigest()
     return {
+        "schema_version": 1,
+        "kind": "github-pr-docs-direct-child",
+        "candidate_digest": candidate_digest,
         "repository_id": repository_id,
         "repository": repository,
-        "installation_id": installation_id,
-        # This is the reviewed source branch, not the PR's base branch.  The
-        # worker's docs PR must merge into the contributor's revision so its
-        # merge creates a new source SHA and re-runs the original Check.
-        "default_branch": followup_base,
-        "default_branch_sha": head_sha,
-        "source": {
-            "kind": "github-pull-request",
-            "key": source_key,
-            "url": f"https://github.com/{repository}/pull/{pr_number}",
-            "projection_capabilities": [],
-        },
-        "docs_impact_source_key": source_key,
-        "documentation_index": "README.md",
-        "domain": "techdocs",
-        "role": "developer",
-        "job": "use the changed developer-facing interface",
-        "starting_context": "a clone of the repository at the reviewed pull-request revision",
-        "success_condition": "the developer can complete the changed workflow from repository documentation",
-        "backfill_policy": "blocking-only",
-        "budgets": {
-            "max_depth": 2,
-            "max_children": 1,
-            "max_docs_prs": 1,
-            "max_debt_issues": 4,
-            "max_elapsed_seconds": 24 * 60 * 60,
-            "max_non_progress": 3,
-        },
+        "pr_number": pr_number,
+        "source_key": source_key,
+        "snapshot_sha": head_sha,
+        "source_branch": followup_base,
+        "candidate_identity": identity,
+        "coverage_cells": coverage_cells,
+        "execution_budgets": {"max_depth": 1, "max_children": 1, "max_docs_prs": 1, "max_elapsed_seconds": 86400, "max_non_progress": 3},
     }
 
 
-def _journey_marker_path(candidate: dict[str, Any]) -> pathlib.Path:
-    canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journey-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
-
-
-def _admit_docs_journey(candidate: dict[str, Any], on_admitted: Callable[[], None] | None = None) -> dict[str, Any]:
-    """Persist and project a blocking journey, then request one City sling.
-
-    This deliberately stops at dispatch.  Worker-result harvesting and
-    check terminalization are a separate, source-bound lifecycle phase.
-    """
+def _persist_direct_child(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Persist one SHA-bound child before the generic review run is advanced."""
     artifact = candidate.get("artifact") if isinstance(candidate, dict) else None
     if not isinstance(artifact, dict) or artifact.get("verdict") != "docs-change-required":
-        raise ValueError("only docs-change-required candidates may enter docs-journey")
-    marker_path = _journey_marker_path(candidate)
+        raise ValueError("only docs-change-required candidates may enter direct child dispatch")
+    canonical = _assignment_bytes(candidate)
+    marker_path = _city_review_dir() / "direct-child-dispatch" / f"{hashlib.sha256(canonical).hexdigest()}.json"
     if marker_path.exists():
-        return json.loads(marker_path.read_text(encoding="utf-8"))
-    installation_id = _installation_id_from_config()
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if not isinstance(marker, dict) or not isinstance(marker.get("handoff_id"), str):
+            raise ValueError("invalid durable direct child marker")
+        return marker
     assignment_identity = artifact.get("identity")
     if not isinstance(assignment_identity, dict):
         raise ValueError("docs-change candidate has no assignment identity")
@@ -304,50 +427,34 @@ def _admit_docs_journey(candidate: dict[str, Any], on_admitted: Callable[[], Non
     review_run = review_store.load(source_key)
     if review_run is None or not isinstance(review_run.get("assignment"), dict):
         raise ValueError("docs-change candidate has no durable assignment")
-    request = _journey_request(candidate, review_run["assignment"], installation_id)
-    payload = {"request": request, "decision": {"artifact": artifact, "journey_disposition": "blocking"}}
-    command = [
-        sys.executable, f"{PACK_SCRIPTS}/github_intake_docs_journey_commands.py", "start-or-admit", "--once",
-        "--store", str(_path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"),
-        "--input", json.dumps(payload, sort_keys=True, separators=(",", ":")),
-    ]
-    started = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    if started.returncode:
-        raise ValueError(started.stderr.strip() or "docs journey admission failed")
-    result = json.loads(started.stdout)
-    journey = result.get("journey") if isinstance(result, dict) else None
-    journey_identity = journey.get("identity") if isinstance(journey, dict) else None
-    if not isinstance(journey_identity, str) or not journey_identity:
-        raise ValueError("docs journey admission returned no identity")
-    if on_admitted is not None:
-        on_admitted()
-    projected = subprocess.run(command[:2] + ["project-until-settled", "--once", "--store", command[5], "--identity", journey_identity], capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    if projected.returncode:
-        raise ValueError(projected.stderr.strip() or "docs journey projection failed")
-    settled = json.loads(projected.stdout)
-    settled_journey = settled.get("journey") if isinstance(settled, dict) else None
-    ready = settled.get("worker_ready_children") if isinstance(settled, dict) else None
-    if not isinstance(settled_journey, dict) or not isinstance(ready, list) or len(ready) != 1:
-        raise ValueError("docs journey did not produce exactly one dispatchable child")
-    child = next((item for item in settled_journey.get("children", []) if isinstance(item, dict) and item.get("key") == ready[0]), None)
-    bead_action = next((item for item in settled_journey.get("actions", []) if isinstance(item, dict) and item.get("kind") == "create_bead" and item.get("child_key") == ready[0] and item.get("state") == "completed"), None)
-    bead_id = ((bead_action or {}).get("resource") or {}).get("id") if isinstance(bead_action, dict) else None
-    if not isinstance(child, dict) or not isinstance(bead_id, str) or not bead_id:
-        raise ValueError("docs journey did not persist dispatchable child evidence")
-    marker = {"bead_id": bead_id, "child_key": ready[0], "journey_identity": journey_identity, "admitted_child": child, "dispatched": False}
+    context_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-context" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+    signed_context = json.loads(context_path.read_text(encoding="utf-8"))
+    request = _direct_child_request(candidate, review_run["assignment"], signed_context)
+    installation_id = str(signed_context.get("installation_id", "") or os.environ.get("GITHUB_INSTALLATION_ID", "")).strip()
+    if not installation_id:
+        config = common.load_effective_config()
+        app = config.get("app") if isinstance(config, dict) else {}
+        installation_id = str((app or {}).get("installation_id", "")).strip()
+    context = {"repository_id": request["repository_id"], "repository": request["repository"], "pr_number": request["pr_number"], "source_key": request["source_key"], "reviewed_head_sha": request["snapshot_sha"], "source_branch": request["source_branch"], "source_url": f"https://github.com/{request['repository']}/pull/{request['pr_number']}", "installation_id": installation_id}
+    payload = {"assignment_bytes": __import__("base64").b64encode(_assignment_bytes(review_run["assignment"])).decode(), "candidate": candidate, "context": context}
+    command = [sys.executable, f"{PACK_SCRIPTS}/github_intake_docs_direct_child_admit.py", "--once", "--store", str(_path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"), "--input", json.dumps(payload, sort_keys=True, separators=(",", ":"))]
+    result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "direct child admission failed")
+    admission = json.loads(result.stdout)
+    if not isinstance(admission, dict) or set(admission) != {"schema_version", "kind", "recursion_identity", "admitted_child", "patch_context"}:
+        raise ValueError("direct child admission returned an invalid record")
+    snapshot = _stage_direct_snapshot(request, installation_id)
+    handoff_id = hashlib.sha256(_assignment_bytes({"request": request, "admission": admission})).hexdigest()
+    receipt_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-handoffs" / f"{handoff_id}.json"
+    receipt = {"handoff_id": handoff_id, "candidate_digest": request["candidate_digest"], "admission": admission, "consumed": False}
+    if receipt_path.exists() and json.loads(receipt_path.read_text(encoding="utf-8")) != receipt:
+        raise ValueError("direct handoff receipt collision")
+    if not receipt_path.exists():
+        _atomic_write(receipt_path, _assignment_bytes(receipt))
+    marker = {"schema_version": 1, "kind": "github-pr-docs-direct-child", "handoff_id": handoff_id, "snapshot": snapshot, "direct_child": admission["admitted_child"], "patch_context": admission["patch_context"], "bead_id": None, "dispatched": False}
     _atomic_write(marker_path, _assignment_bytes(marker))
     return marker
-
-
-def _installation_id_from_config() -> str:
-    value = os.environ.get("GITHUB_INSTALLATION_ID", "")
-    if not str(value).strip():
-        config = common.load_effective_config()
-        app = config.get("app") if isinstance(config, dict) else None
-        value = (app or {}).get("installation_id", "")
-    if not str(value).strip():
-        raise ValueError("GitHub App installation id is unavailable for docs journey")
-    return str(value)
 
 
 class ComposeAdapter:
@@ -391,7 +498,7 @@ def _dispatch_city(run: dict[str, Any]) -> None:
         "Do not use GitHub credentials, network access, or mutate GitHub.",
     ))
     metadata = json.dumps({"github.docs_review.assignment_sha256": digest, "github.docs_review.candidate_path": str(candidate_path)}, sort_keys=True)
-    request_path = review_root.parent / "requests" / f"{digest}.json"
+    request_path = _city_review_dir() / "requests" / f"{digest}.json"
     request = {"source_key": identity["source_key"], "description": description, "metadata": metadata}
     if request_path.exists() and json.loads(request_path.read_text(encoding="utf-8")) != request:
         raise ValueError("immutable City review request collision")
@@ -467,6 +574,9 @@ def intake(payload: dict[str, Any], token: str, now: float) -> dict[str, Any]:
     files = common.github_api_paginated_list_request("GET", path, bearer_token=token)
     assignment = runtime.assignment_from_paginated_evidence(delivery, [files])
     store = runtime.FileDocsReviewStore(_path_env("GC_GITHUB_DOCS_REVIEW_RUNS_DIR"))
+    delivery_context = {"source_branch": delivery["head_ref"], "installation_id": _installation_id(payload)}
+    context_path = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-child-context" / f"{hashlib.sha256(assignment['identity']['source_key'].encode()).hexdigest()}.json"
+    _atomic_write(context_path, _assignment_bytes(delivery_context))
     return runtime.intake_delivery(store, assignment, ComposeAdapter(store, _gateway(payload)), now=now)
 
 
@@ -490,24 +600,87 @@ def candidates(now: float, source_key: str | None = None) -> list[dict[str, Any]
                 result.append({"accepted": False, "reason": "stale review run"})
                 continue
             if isinstance(artifact, dict) and artifact.get("verdict") == "docs-change-required":
-                # Do not terminalize the visible Check before the exact
-                # blocking decision has become a durable City journey.  The
-                # later worker-result bridge owns candidate acceptance and the
-                # check's terminal transition.
-                accepted: dict[str, Any] | None = None
-                def mark_journey_pending() -> None:
-                    nonlocal accepted
-                    accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
-                journey = _admit_docs_journey(candidate, mark_journey_pending)
-                # The generic runtime owns the visible Check's durable
-                # ``journey-pending`` transition. Admission is deliberately
-                # first: a crash cannot leave a pending Check with no journey.
-                result.append({"journey": journey, "review": accepted})
+                # The direct child is the sole executable PR continuation.
+                # Persist it before advancing the generic review record so a
+                # crash cannot leave a pending Check without bounded work.
+                direct_child = _persist_direct_child(candidate)
+                accepted = runtime.accept_candidate(store, candidate, adapter, now=now)
+                result.append({"direct_child": direct_child, "review": accepted})
             else:
                 result.append(runtime.accept_candidate(store, candidate, adapter, now=now))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             result.append({"accepted": False, "reason": f"invalid candidate {path.name}: {exc}"})
     return result
+
+
+def publish_direct_child_results() -> list[str]:
+    """Let the credentialed App service complete City-produced patch results.
+
+    The City owns only the credential-free Bead harvest and an append-only
+    result outbox. Pack completion, GitHub App authentication, branch push,
+    and PR projection all remain in this service.
+    """
+    outbox = _path_env("GC_GITHUB_DOCS_DIRECT_RESULT_DIR")
+    receipt_root = outbox.parent / "direct-result-receipts"
+    journey_root = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "journeys"
+    pack_scripts = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+    published: list[str] = []
+    for result_path in sorted(outbox.glob("*.json"))[:256]:
+        try:
+            digest = result_path.stem
+            if not _is_lower_hex_digest(digest):
+                continue
+            stat = result_path.lstat()
+            if not result_path.is_file() or result_path.is_symlink() or stat.st_size > 262_144:
+                continue
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            handoff = _path_env("GC_GITHUB_DOCS_ASSIGNMENT_DIR").parent / "direct-handoffs" / f"{digest}.json"
+            if not handoff.is_file() or handoff.is_symlink() or handoff.lstat().st_size > 262_144:
+                continue
+            receipt = json.loads(handoff.read_text(encoding="utf-8"))
+            admission = _trusted_direct_result(receipt, digest, payload)
+            if admission is None:
+                continue
+            completion_payload = {"admission": receipt["admission"], "update": payload["update"]}
+            receipt_path = receipt_root / f"{digest}.json"
+            if receipt_path.exists():
+                if json.loads(receipt_path.read_text(encoding="utf-8")).get("payload") != payload:
+                    continue
+                continue
+            completed = subprocess.run(
+                [sys.executable, f"{pack_scripts}/github_intake_docs_direct_child_complete.py", "--once", "--store", str(journey_root), "--input", json.dumps(completion_payload, sort_keys=True, separators=(",", ":"))],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if completed.returncode:
+                continue
+            admission = receipt["admission"]
+            identity = admission.get("recursion_identity") if isinstance(admission, dict) else None
+            if not isinstance(identity, str) or not identity:
+                continue
+            projected = subprocess.run(
+                [sys.executable, f"{pack_scripts}/github_intake_docs_journey_commands.py", "project-until-settled", "--once", "--store", str(journey_root), "--identity", identity],
+                capture_output=True, text=True, check=False, timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            if projected.returncode:
+                continue
+            _atomic_write(receipt_path, _assignment_bytes({"payload": payload, "completion": json.loads(completed.stdout), "projection": json.loads(projected.stdout)}))
+            _atomic_write(handoff, _assignment_bytes({**receipt, "consumed": True}))
+            published.append(digest)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return published
+
+
+def publish_legacy_journey_results() -> list[str]:
+    """Keep legacy evidence recoverable but never publish it without a receipt.
+
+    Legacy City markers predate trusted handoff receipts. Their hostile outbox
+    records are retained for operator migration, but cannot trigger Pack or
+    GitHub side effects.
+    """
+    return []
 
 
 class _ScopedDocsReviewStore:
@@ -536,7 +709,9 @@ def reconcile(now: float, source_key: str | None = None) -> dict[str, Any]:
     harvested = _harvest_city_candidates(source_key)
     accepted = candidates(now, source_key)
     reconciler_store: Any = _ScopedDocsReviewStore(store, source_key) if source_key else store
-    return {"harvested": harvested, "candidates": accepted, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
+    direct_results = publish_direct_child_results()
+    legacy_results = publish_legacy_journey_results()
+    return {"harvested": harvested, "candidates": accepted, "direct_results": direct_results, "legacy_results": legacy_results, "runs": runtime.reconcile_pending(reconciler_store, adapter, now=now)}
 
 
 def main() -> int:

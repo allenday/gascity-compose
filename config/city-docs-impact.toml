@@ -24,6 +24,14 @@ work_dir = ".gc/agents/{{.AgentBase}}"
 
 [[patches.agent]]
 rig = "*"
+name = "github-docs-impact.docs-recursion-direct-child"
+provider = "codex-docs-impact"
+work_dir = ".gc/agents/{{.AgentBase}}"
+
+# Upgrade-only recovery: persisted legacy journey markers retain the worker
+# contract that created them while new PR work uses the direct-child agent.
+[[patches.agent]]
+rig = "*"
 name = "github-docs-impact.docs-journey"
 provider = "codex-docs-impact"
 work_dir = ".gc/agents/{{.AgentBase}}"

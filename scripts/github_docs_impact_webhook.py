@@ -31,6 +31,21 @@ from github_durable_gateway import (
 MAX_PAYLOAD_BYTES = 1_048_576
 
 
+def _direct_result_publisher_loop() -> None:
+    """Publish City outbox records only from the credentialed App service."""
+    from github_docs_impact_compose_adapter import publish_direct_child_results, publish_legacy_journey_results
+
+    interval = max(1.0, float(os.environ.get("GC_GITHUB_DOCS_RECONCILE_SECONDS", "15")))
+    while True:
+        try:
+            publish_direct_child_results()
+            publish_legacy_journey_results()
+        except (OSError, ValueError):
+            # The durable outbox remains for the next App-side attempt.
+            pass
+        time.sleep(interval)
+
+
 def _app() -> dict[str, object]:
     value = common.load_effective_config().get("app")
     if not isinstance(value, dict):
@@ -133,6 +148,7 @@ def main() -> None:
     server.worker_health = worker_health
     server.clock = time.time
     threading.Thread(target=worker_loop, args=(store, worker_health), name="github-durable-gateway", daemon=True).start()
+    threading.Thread(target=_direct_result_publisher_loop, name="github-direct-result-publisher", daemon=True).start()
     server.serve_forever()
 
 
