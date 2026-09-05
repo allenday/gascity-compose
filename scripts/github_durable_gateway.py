@@ -33,6 +33,20 @@ class InputValidationError(ValueError):
     """A terminal delivery error that cannot succeed when retried."""
 
 
+def is_reconcilable_pull_request_action(document: dict[str, object]) -> bool:
+    """Accept normal review actions and GitHub's explicit base-ref retarget."""
+    action = document.get("action")
+    changes = document.get("changes")
+    return action in PULL_REQUEST_ACTIONS or (
+        action == "edited"
+        and isinstance(changes, dict)
+        and isinstance(changes.get("base"), dict)
+        and isinstance(changes["base"].get("ref"), dict)
+        and isinstance(changes["base"]["ref"].get("from"), str)
+        and bool(changes["base"]["ref"]["from"].strip())
+    )
+
+
 class WorkerHealth:
     """Thread-safe worker liveness and bounded progress history."""
 
@@ -129,7 +143,7 @@ def validate_pull_request_payload(payload: bytes) -> dict[str, object]:
         raise InputValidationError("pull_request webhook is not valid JSON") from exc
     if not isinstance(document, dict):
         raise InputValidationError("pull_request webhook must be an object")
-    if document.get("action") not in PULL_REQUEST_ACTIONS:
+    if not is_reconcilable_pull_request_action(document):
         raise InputValidationError("pull_request webhook action is unsupported")
 
     installation = document.get("installation")

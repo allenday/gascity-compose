@@ -60,9 +60,8 @@ def _post_webhook(body: bytes, headers: dict[str, str], *, server: object | None
     return _request_json("/v0/github/webhook", body=body, headers=headers, server=server)
 
 
-def _valid_payload(*, action: str = "opened", sha: str = "a" * 40) -> bytes:
-    return json.dumps(
-        {
+def _valid_payload(*, action: str = "opened", sha: str = "a" * 40, changes: dict[str, object] | None = None) -> bytes:
+    document: dict[str, object] = {
             "action": action,
             "installation": {"id": 23},
             "repository": {"id": 17, "full_name": "example/docs"},
@@ -71,9 +70,10 @@ def _valid_payload(*, action: str = "opened", sha: str = "a" * 40) -> bytes:
                 "base": {"ref": "main", "sha": "b" * 40, "repo": {"id": 17, "full_name": "example/docs"}},
                 "head": {"ref": "feature/docs", "sha": sha, "repo": {"id": 17, "full_name": "example/docs"}},
             },
-        },
-        sort_keys=True,
-    ).encode()
+    }
+    if changes is not None:
+        document["changes"] = changes
+    return json.dumps(document, sort_keys=True).encode()
 
 
 class GatewayStoreTests(unittest.TestCase):
@@ -203,6 +203,43 @@ class GatewayStoreTests(unittest.TestCase):
 
 
 class GatewayIngressWorkerTests(unittest.TestCase):
+    def test_signed_base_retarget_is_durable_at_http_ingress(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            payload = _valid_payload(
+                action="edited",
+                changes={"base": {"ref": {"from": "test/docs-journey-dogfood"}}},
+            )
+            headers = {
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "pull_request",
+                "X-GitHub-Delivery": "delivery-retarget-123",
+                "X-Hub-Signature-256": "sha256=verified",
+            }
+
+            with mock.patch.object(webhook, "GatewayStore", return_value=store), mock.patch.object(webhook, "_app", return_value={"webhook_secret": "secret"}), mock.patch.object(webhook.common, "verify_github_signature", return_value=True):
+                status, response = _post_webhook(payload, headers)
+
+            self.assertEqual((status, response), (202, {"accepted": True}))
+            with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT delivery_id, payload FROM deliveries").fetchall(), [("delivery-retarget-123", payload)])
+
+    def test_base_retarget_delivery_is_accepted_for_reconciliation(self) -> None:
+        payload = _valid_payload(
+            action="edited",
+            changes={"base": {"ref": {"from": "test/docs-journey-dogfood"}}},
+        )
+
+        document = gateway.validate_pull_request_payload(payload)
+
+        self.assertEqual(document["action"], "edited")
+
+    def test_unrelated_pr_edit_is_not_accepted_for_reconciliation(self) -> None:
+        payload = _valid_payload(action="edited", changes={"title": {"from": "old title"}})
+
+        with self.assertRaisesRegex(gateway.InputValidationError, "unsupported"):
+            gateway.validate_pull_request_payload(payload)
+
     def test_verified_delivery_is_durable_before_the_handler_returns_accepted(self) -> None:
         """Catches a 202 acknowledgement emitted before the inbox transaction commits."""
         with tempfile.TemporaryDirectory() as temp:
