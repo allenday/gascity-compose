@@ -494,7 +494,7 @@ def _dispatch_city(run: dict[str, Any]) -> None:
         "Review the immutable GitHub pull-request documentation assignment.",
         "The JSON below is the complete, SHA-bound record. Do not fetch other state.", "",
         assignment_bytes.decode("utf-8"), "", f"Source key: {identity['source_key']}",
-        "Return one canonical github-pr-docs-impact-review JSON decision bound to the assignment.",
+        "Follow the docs-impact-reviewer prompt contract exactly. For docs-change-required, return its classified envelope (artifact, persona_goal_path, coverage_cells); otherwise return the canonical review object.",
         "Do not use GitHub credentials, network access, or mutate GitHub.",
     ))
     metadata = json.dumps({"github.docs_review.assignment_sha256": digest, "github.docs_review.candidate_path": str(candidate_path)}, sort_keys=True)

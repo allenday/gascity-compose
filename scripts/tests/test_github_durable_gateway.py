@@ -60,20 +60,27 @@ def _post_webhook(body: bytes, headers: dict[str, str], *, server: object | None
     return _request_json("/v0/github/webhook", body=body, headers=headers, server=server)
 
 
-def _valid_payload(*, action: str = "opened", sha: str = "a" * 40) -> bytes:
-    return json.dumps(
-        {
+def _valid_payload(
+    *,
+    action: str = "opened",
+    sha: str = "a" * 40,
+    base_sha: str = "b" * 40,
+    base_ref: str = "main",
+    changes: dict[str, object] | None = None,
+) -> bytes:
+    document: dict[str, object] = {
             "action": action,
             "installation": {"id": 23},
             "repository": {"id": 17, "full_name": "example/docs"},
             "pull_request": {
                 "number": 9,
-                "base": {"ref": "main", "sha": "b" * 40, "repo": {"id": 17, "full_name": "example/docs"}},
+                "base": {"ref": base_ref, "sha": base_sha, "repo": {"id": 17, "full_name": "example/docs"}},
                 "head": {"ref": "feature/docs", "sha": sha, "repo": {"id": 17, "full_name": "example/docs"}},
             },
-        },
-        sort_keys=True,
-    ).encode()
+    }
+    if changes is not None:
+        document["changes"] = changes
+    return json.dumps(document, sort_keys=True).encode()
 
 
 class GatewayStoreTests(unittest.TestCase):
@@ -203,6 +210,241 @@ class GatewayStoreTests(unittest.TestCase):
 
 
 class GatewayIngressWorkerTests(unittest.TestCase):
+    def test_signed_base_retarget_is_durable_at_http_ingress(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            payload = _valid_payload(
+                action="edited",
+                changes={"base": {"ref": {"from": "test/docs-journey-dogfood"}}},
+            )
+            headers = {
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "pull_request",
+                "X-GitHub-Delivery": "delivery-retarget-123",
+                "X-Hub-Signature-256": "sha256=verified",
+            }
+
+            with mock.patch.object(webhook, "GatewayStore", return_value=store), mock.patch.object(webhook, "_app", return_value={"webhook_secret": "secret"}), mock.patch.object(webhook.common, "verify_github_signature", return_value=True):
+                status, response = _post_webhook(payload, headers)
+
+            self.assertEqual((status, response), (202, {"accepted": True}))
+            with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT delivery_id, payload FROM deliveries").fetchall(), [("delivery-retarget-123", payload)])
+
+    def test_base_retarget_delivery_is_accepted_for_reconciliation(self) -> None:
+        payload = _valid_payload(
+            action="edited",
+            changes={"base": {"ref": {"from": "test/docs-journey-dogfood"}}},
+        )
+
+        document = gateway.validate_pull_request_payload(payload)
+
+        self.assertEqual(document["action"], "edited")
+
+    def test_base_retarget_with_the_same_head_reconciles_as_a_new_v2_review(self) -> None:
+        """Catches target changes colliding with the completed review of the old target."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            before = _valid_payload(sha="a" * 40, base_sha="b" * 40, base_ref="main")
+            after = _valid_payload(
+                action="edited",
+                sha="a" * 40,
+                base_sha="c" * 40,
+                base_ref="release",
+                changes={"base": {"ref": {"from": "main"}}},
+            )
+            old_key, new_key = gateway._source_key(before), gateway._source_key(after)
+            review_root = root / "docs-review"
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+            reconciled: list[str] = []
+
+            def run_adapter(job: gateway.Job) -> dict[str, object]:
+                if job.kind == "intake":
+                    return {}
+                source_key = gateway._source_key(job.payload)
+                reconciled.append(source_key)
+                digest = hashlib.sha256(source_key.encode()).hexdigest()
+                if job.kind == "dispatch":
+                    path = review_root / "dispatch" / f"{digest}.json"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"bead_id": f"bead-{digest}", "source_key": source_key, "dispatched": True}))
+                elif job.kind == "harvest":
+                    path = review_root / "candidates" / f"{digest}.json"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}))
+                else:
+                    path = review_root / "runs" / f"{digest}.json"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": []}))
+                return {}
+
+            self.assertNotEqual(old_key, new_key)
+            self.assertTrue(old_key.startswith("github-pr:v2:17:9:"))
+            self.assertTrue(new_key.startswith("github-pr:v2:17:9:"))
+            store.enqueue_delivery("delivery-before", "pull_request", before, 100)
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertTrue(gateway.process_one(store, 101))
+                store.enqueue_delivery("delivery-after", "pull_request", after, 102)
+                for now in range(102, 108):
+                    self.assertTrue(gateway.process_one(store, now))
+
+            self.assertEqual(reconciled.count(old_key), 3)
+            self.assertEqual(reconciled.count(new_key), 3)
+            self.assertTrue((review_root / "runs" / f"{hashlib.sha256(old_key.encode()).hexdigest()}.json").exists())
+            self.assertTrue((review_root / "runs" / f"{hashlib.sha256(new_key.encode()).hexdigest()}.json").exists())
+
+    def test_legacy_v1_dispatch_marker_keeps_its_following_harvest_on_v1(self) -> None:
+        """Catches an upgrade stranding a v1 run after dispatch already persisted."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            payload = _valid_payload()
+            legacy_key = "github-pr:17:9:" + "a" * 40
+            review_root = root / "docs-review"
+            marker = review_root / "dispatch" / "legacy.json"
+            marker.parent.mkdir(parents=True)
+            marker.write_text(json.dumps({"bead_id": "legacy-bead", "source_key": legacy_key, "dispatched": True}))
+            job = gateway.Job(1, "legacy-delivery", "pull_request", payload, None, "harvest", 0, 0, 1)
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+
+            with mock.patch.dict(os.environ, environment, clear=False):
+                self.assertEqual(gateway._reconciliation_source_key(job), legacy_key)
+
+    def test_v2_delivery_never_completes_from_a_colliding_v1_lineage(self) -> None:
+        """Catches a retarget adopting old-target v1 evidence with the same PR head."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            review_root = root / "docs-review"
+            payload = _valid_payload(
+                action="edited",
+                base_sha="c" * 40,
+                base_ref="release",
+                changes={"base": {"ref": {"from": "main"}}},
+            )
+            v2_key = gateway._source_key(payload)
+            v1_key = gateway._legacy_source_key(payload)
+            job = gateway.Job(1, "retarget-delivery", "pull_request", payload, v2_key, "project", 0, 0, 1)
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+            for source_key in (v1_key, v2_key):
+                digest = hashlib.sha256(source_key.encode()).hexdigest()
+                marker = review_root / "dispatch" / f"{digest}.json"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"bead_id": f"bead-{digest}", "source_key": source_key, "dispatched": True}))
+                candidate = review_root / "candidates" / f"{digest}.json"
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}))
+                run = review_root / "runs" / f"{digest}.json"
+                run.parent.mkdir(parents=True, exist_ok=True)
+                run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": []}))
+
+            with mock.patch.dict(os.environ, environment, clear=False):
+                self.assertEqual(gateway._reconciliation_source_key(job), v2_key)
+                self.assertTrue(gateway._stage_completed(job))
+                (review_root / "runs" / f"{hashlib.sha256(v2_key.encode()).hexdigest()}.json").unlink()
+                self.assertFalse(gateway._stage_completed(job))
+
+    def test_gateway_records_v2_lineage_only_for_post_upgrade_deliveries(self) -> None:
+        """Catches a schema migration rewriting an in-flight v1 delivery as v2."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = gateway.GatewayStore(pathlib.Path(temp))
+            legacy_payload = _valid_payload()
+            with sqlite3.connect(pathlib.Path(temp) / "gateway.sqlite") as connection:
+                connection.execute(
+                    "INSERT INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ("pre-upgrade", "pull_request", legacy_payload, None, 100),
+                )
+                connection.execute(
+                    "INSERT INTO jobs(delivery_id, kind, available_at) VALUES (?, ?, ?)",
+                    ("pre-upgrade", "dispatch", 100),
+                )
+            current_payload = _valid_payload(base_sha="c" * 40, base_ref="release")
+            self.assertTrue(store.enqueue_delivery("post-upgrade", "pull_request", current_payload, 101))
+
+            current = store.claim(101)
+            assert current is not None
+            self.assertEqual(current.delivery_id, "post-upgrade")
+            self.assertEqual(current.source_key, gateway._source_key(current_payload))
+            self.assertTrue(store.complete(current.id, current.lease_token))
+            legacy = store.claim(101)
+            assert legacy is not None
+            self.assertEqual(legacy.delivery_id, "pre-upgrade")
+            self.assertIsNone(legacy.source_key)
+            self.assertEqual(gateway._reconciliation_source_key(legacy), gateway._legacy_source_key(legacy_payload))
+
+    def test_pre_upgrade_pending_intake_binds_v2_before_its_dispatch_while_old_dispatch_stays_v1(self) -> None:
+        """Catches a v2 intake creating a successor that later reconciles as v1."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            intake_payload = _valid_payload(base_ref="release", base_sha="c" * 40)
+            dispatch_payload = _valid_payload(sha="d" * 40)
+            intake_v2 = gateway._source_key(intake_payload)
+            dispatch_v1 = gateway._legacy_source_key(dispatch_payload)
+            review_root = root / "docs-review"
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+            }
+            reconciled: list[tuple[str, str]] = []
+
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                connection.execute(
+                    "INSERT INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ("old-pending-intake", "pull_request", intake_payload, None, 100),
+                )
+                connection.execute(
+                    "INSERT INTO jobs(delivery_id, kind, available_at) VALUES (?, ?, ?)",
+                    ("old-pending-intake", "intake", 100),
+                )
+                connection.execute(
+                    "INSERT INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ("old-dispatch", "pull_request", dispatch_payload, None, 99),
+                )
+                connection.execute(
+                    "INSERT INTO jobs(delivery_id, kind, available_at) VALUES (?, ?, ?)",
+                    ("old-dispatch", "dispatch", 100),
+                )
+
+            def run_adapter(job: gateway.Job) -> dict[str, object]:
+                if job.kind == "intake":
+                    return {}
+                source_key = gateway._reconciliation_source_key(job)
+                reconciled.append((job.delivery_id, source_key))
+                marker = review_root / "dispatch" / f"{job.delivery_id}.json"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"bead_id": job.delivery_id, "source_key": source_key, "dispatched": True}))
+                return {}
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertTrue(gateway.process_one(store, 101))
+                self.assertTrue(gateway.process_one(store, 102))
+
+            self.assertEqual(
+                reconciled,
+                [("old-pending-intake", intake_v2), ("old-dispatch", dispatch_v1)],
+            )
+
+    def test_unrelated_pr_edit_is_not_accepted_for_reconciliation(self) -> None:
+        payload = _valid_payload(action="edited", changes={"title": {"from": "old title"}})
+
+        with self.assertRaisesRegex(gateway.InputValidationError, "unsupported"):
+            gateway.validate_pull_request_payload(payload)
+
     def test_verified_delivery_is_durable_before_the_handler_returns_accepted(self) -> None:
         """Catches a 202 acknowledgement emitted before the inbox transaction commits."""
         with tempfile.TemporaryDirectory() as temp:
@@ -358,7 +600,8 @@ class GatewayIngressWorkerTests(unittest.TestCase):
 
     def test_adapter_process_has_a_bounded_timeout(self) -> None:
         """A hung GitHub reconciliation cannot monopolize the sole gateway worker."""
-        job = gateway.Job(1, "delivery-timeout", "pull_request", _valid_payload(), "dispatch", 0, 0, 1)
+        payload = _valid_payload()
+        job = gateway.Job(1, "delivery-timeout", "pull_request", payload, gateway._source_key(payload), "dispatch", 0, 0, 1)
         completed = mock.Mock(returncode=0, stdout="{}", stderr="")
         with mock.patch.object(gateway.subprocess, "run", return_value=completed) as command:
             gateway._run_adapter(job)
@@ -366,7 +609,7 @@ class GatewayIngressWorkerTests(unittest.TestCase):
         self.assertGreater(command.call_args.kwargs["timeout"], 0)
         self.assertEqual(
             command.call_args.args[0][-2:],
-            ["--source-key", "github-pr:17:9:" + "a" * 40],
+            ["--source-key", gateway._source_key(payload)],
         )
 
     def test_empty_reconciliation_keeps_dispatch_retryable(self) -> None:
@@ -390,6 +633,34 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             with sqlite3.connect(root / "gateway.sqlite") as connection:
                 self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = 'dispatch'").fetchone(), ("pending", 1, None))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 0)
+
+    def test_city_request_completes_direct_dispatch(self) -> None:
+        """The direct-recursion request is the durable dispatch receipt, not a legacy marker."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            payload = _valid_payload()
+            source_key = gateway._source_key(payload)
+            store.enqueue_delivery("delivery-city-request-123", "pull_request", payload, 100)
+            review_root = root / "docs-review"
+            city_review = root / "city-review"
+            request = city_review / "requests" / "request.json"
+            request.parent.mkdir(parents=True)
+            request.write_text(json.dumps({"source_key": source_key}))
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+                "GC_GITHUB_DOCS_CITY_REVIEW_DIR": str(city_review),
+            }
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", return_value={}):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertTrue(gateway.process_one(store, 101))
+
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT status FROM jobs WHERE kind = 'dispatch'").fetchone(), ("complete",))
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 1)
 
     def test_newer_pr_revision_preempts_old_reconciliation_stages(self) -> None:
         """A fresh PR revision must not sit behind stale harvest or dispatch work."""
@@ -460,8 +731,8 @@ class GatewayIngressWorkerTests(unittest.TestCase):
             root = pathlib.Path(temp)
             store = gateway.GatewayStore(root)
             sha = "a" * 40
-            source_key = f"github-pr:17:9:{sha}"
             payload = _valid_payload(sha=sha)
+            source_key = gateway._source_key(payload)
             store.enqueue_delivery("delivery-stages-123", "pull_request", payload, 100)
             seen: list[tuple[str, bytes]] = []
             review_root = root / "docs-review"

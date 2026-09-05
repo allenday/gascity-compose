@@ -20,9 +20,9 @@ import github_intake_common as common
 from github_durable_gateway import (
     GatewayStore,
     InputValidationError,
-    PULL_REQUEST_ACTIONS,
     WORKER_STALL_SECONDS,
     WorkerHealth,
+    is_reconcilable_pull_request_action,
     validate_pull_request_payload,
     worker_loop,
 )
@@ -117,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             event = self.headers.get("X-GitHub-Event", "")
             document = json.loads(payload)
-            if event != "pull_request" or not isinstance(document, dict) or document.get("action") not in PULL_REQUEST_ACTIONS:
+            if event != "pull_request" or not isinstance(document, dict) or not is_reconcilable_pull_request_action(document):
                 self._reply(HTTPStatus.ACCEPTED, {"accepted": False, "reason": "ignored"})
                 return
             delivery_id = self.headers.get("X-GitHub-Delivery", "").strip()

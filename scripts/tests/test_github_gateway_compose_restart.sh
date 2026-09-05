@@ -87,9 +87,16 @@ if row is None:
 delivery_id, kind, raw = row
 payload = json.loads(raw)
 repository_id = str(payload["repository"]["id"])
-number = payload["pull_request"]["number"]
-sha = payload["pull_request"]["head"]["sha"].lower()
-source_key = f"github-pr:{repository_id}:{number}:{sha}"
+pull_request = payload["pull_request"]
+number = pull_request["number"]
+sha = pull_request["head"]["sha"].lower()
+base = pull_request["base"]
+base_binding = json.dumps(
+    {"base_ref": str(base["ref"]), "base_sha": str(base["sha"]).lower()},
+    sort_keys=True,
+    separators=(",", ":"),
+).encode("utf-8")
+source_key = f"github-pr:v2:{repository_id}:{number}:{sha}:{hashlib.sha256(base_binding).hexdigest()}"
 source_digest = hashlib.sha256(source_key.encode()).hexdigest()
 write_once(review / "effects" / source_digest / f"{kind}.json", {"first_delivery_id": delivery_id, "kind": kind, "source_key": source_key})
 
@@ -243,9 +250,15 @@ import pathlib
 import sqlite3
 import sys
 import hashlib
+import json
 
 state = pathlib.Path(sys.argv[1])
-source_key = "github-pr:17:9:" + "a" * 40
+base_binding = json.dumps(
+    {"base_ref": "main", "base_sha": "b" * 40},
+    sort_keys=True,
+    separators=(",", ":"),
+).encode("utf-8")
+source_key = "github-pr:v2:17:9:" + "a" * 40 + ":" + hashlib.sha256(base_binding).hexdigest()
 source_digest = hashlib.sha256(source_key.encode()).hexdigest()
 effects = sorted(path.name for path in (state / "docs-review/effects" / source_digest).glob("*.json"))
 assert effects == ["dispatch.json", "harvest.json", "intake.json", "project.json"], effects

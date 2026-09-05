@@ -506,9 +506,22 @@ class CandidateBridgeTests(unittest.TestCase):
             self.assertEqual(command.call_args.args[0], ["gc", "--city", "/city", "--rig", "my-project", "bd", "close", "mp-old", "--force", "--reason", "Superseded by a newer GitHub pull-request revision", "--json"])
             self.assertEqual(json.loads(marker.read_text())["dispatched"], "retired")
 
-    def test_city_peek_export_recovers_only_the_canonical_review_object(self) -> None:
+    def test_city_peek_export_recovers_review_or_classified_docs_change(self) -> None:
         rendered = "intro\n• " + json.dumps(review()) + "\n\n› Implement {feature}"
         self.assertEqual(dispatcher._review_from_peek({"output": rendered}), review())
+        classified = {
+            "artifact": {**review(), "verdict": "docs-change-required"},
+            "persona_goal_path": {
+                "domain": "techdocs", "role": "developer", "job": "use the interface",
+                "starting_context": "source checkout", "success_condition": "can use it",
+                "documentation_entry_point": "README.md",
+            },
+            "coverage_cells": [{
+                "identity": "developer:use-interface:how-to", "classification": "unmet",
+                "evidence_paths": ["docs/guide.md"],
+            }],
+        }
+        self.assertEqual(dispatcher._review_from_peek({"output": "• " + json.dumps(classified)}), classified)
         self.assertIsNone(dispatcher._review_from_peek({"output": "• {not json}"}))
 
     def test_city_export_closes_an_open_reviewer_bead_after_persisting_valid_review(self) -> None:

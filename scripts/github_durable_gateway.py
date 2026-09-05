@@ -33,6 +33,20 @@ class InputValidationError(ValueError):
     """A terminal delivery error that cannot succeed when retried."""
 
 
+def is_reconcilable_pull_request_action(document: dict[str, object]) -> bool:
+    """Accept normal review actions and GitHub's explicit base-ref retarget."""
+    action = document.get("action")
+    changes = document.get("changes")
+    return action in PULL_REQUEST_ACTIONS or (
+        action == "edited"
+        and isinstance(changes, dict)
+        and isinstance(changes.get("base"), dict)
+        and isinstance(changes["base"].get("ref"), dict)
+        and isinstance(changes["base"]["ref"].get("from"), str)
+        and bool(changes["base"]["ref"]["from"].strip())
+    )
+
+
 class WorkerHealth:
     """Thread-safe worker liveness and bounded progress history."""
 
@@ -115,6 +129,7 @@ class Job:
     delivery_id: str
     event: str
     payload: bytes
+    source_key: str | None
     kind: str
     attempts: int
     lease_until: int
@@ -129,7 +144,7 @@ def validate_pull_request_payload(payload: bytes) -> dict[str, object]:
         raise InputValidationError("pull_request webhook is not valid JSON") from exc
     if not isinstance(document, dict):
         raise InputValidationError("pull_request webhook must be an object")
-    if document.get("action") not in PULL_REQUEST_ACTIONS:
+    if not is_reconcilable_pull_request_action(document):
         raise InputValidationError("pull_request webhook action is unsupported")
 
     installation = document.get("installation")
@@ -208,6 +223,7 @@ class GatewayStore:
                     delivery_id TEXT PRIMARY KEY,
                     event TEXT NOT NULL,
                     payload BLOB NOT NULL,
+                    source_key TEXT,
                     received_at INTEGER NOT NULL
                 )
                 """
@@ -232,16 +248,23 @@ class GatewayStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             if "lease_token" not in columns:
                 connection.execute("ALTER TABLE jobs ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0")
+            delivery_columns = {row[1] for row in connection.execute("PRAGMA table_info(deliveries)")}
+            if "source_key" not in delivery_columns:
+                connection.execute("ALTER TABLE deliveries ADD COLUMN source_key TEXT")
             connection.execute("CREATE INDEX IF NOT EXISTS jobs_runnable ON jobs(status, available_at, lease_until)")
 
     def enqueue_delivery(self, delivery_id: str, event: str, payload: bytes, now: int) -> bool:
         """Store a verified delivery and its initial job exactly once."""
+        try:
+            source_key = _source_key(payload) if event == "pull_request" else None
+        except InputValidationError:
+            source_key = None
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 inserted = connection.execute(
-                    "INSERT OR IGNORE INTO deliveries(delivery_id, event, payload, received_at) VALUES (?, ?, ?, ?)",
-                    (delivery_id, event, payload, now),
+                    "INSERT OR IGNORE INTO deliveries(delivery_id, event, payload, source_key, received_at) VALUES (?, ?, ?, ?, ?)",
+                    (delivery_id, event, payload, source_key, now),
                 ).rowcount == 1
                 if inserted:
                     connection.execute(
@@ -254,8 +277,16 @@ class GatewayStore:
                 connection.execute("ROLLBACK")
                 raise
 
-    def advance(self, job_id: int, lease_token: int, next_kind: str | None, now: int) -> bool:
-        """Complete a leased job and durably schedule its successor."""
+    def advance(
+        self,
+        job_id: int,
+        lease_token: int,
+        next_kind: str | None,
+        now: int,
+        *,
+        source_key: str | None = None,
+    ) -> bool:
+        """Complete a leased job, bind its accepted lineage, and schedule its successor."""
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -266,6 +297,11 @@ class GatewayStore:
                 if row is None:
                     connection.execute("COMMIT")
                     return False
+                if source_key is not None:
+                    connection.execute(
+                        "UPDATE deliveries SET source_key = ? WHERE delivery_id = ? AND source_key IS NULL",
+                        (source_key, row[0]),
+                    )
                 connection.execute(
                     "UPDATE jobs SET status = 'complete', lease_until = NULL, completed_at = ? WHERE id = ?",
                     (now, job_id),
@@ -288,7 +324,7 @@ class GatewayStore:
             try:
                 row = connection.execute(
                     """
-                    SELECT jobs.id, jobs.delivery_id, deliveries.event, deliveries.payload,
+                    SELECT jobs.id, jobs.delivery_id, deliveries.event, deliveries.payload, deliveries.source_key,
                            jobs.kind, jobs.attempts, jobs.lease_token
                     FROM jobs JOIN deliveries USING (delivery_id)
                     WHERE jobs.status IN ('pending', 'leased')
@@ -443,7 +479,7 @@ def _run_adapter(job: Job) -> dict[str, object]:
             payload_path = pathlib.Path(handle.name)
         command.extend(("intake", "--once", "--payload-file", str(payload_path)))
     elif job.kind in {"dispatch", "harvest", "project"}:
-        command.extend(("reconcile", "--once", "--source-key", _source_key(job.payload)))
+        command.extend(("reconcile", "--once", "--source-key", _reconciliation_source_key(job)))
     else:
         raise ValueError(f"unknown gateway job kind: {job.kind}")
     try:
@@ -470,14 +506,38 @@ def _run_adapter(job: Job) -> dict[str, object]:
 
 
 def _source_key(payload: bytes) -> str:
+    """Return the Pack v2 identity for one immutable PR target revision.
+
+    v1 records remain readable by the Pack, but new gateway reconciliation
+    must distinguish an unchanged head retargeted to another base revision.
+    """
     document = validate_pull_request_payload(payload)
     repository = document["repository"]
     pull_request = document["pull_request"]
     head = pull_request["head"]
+    base = pull_request["base"]
     repository_id = str(repository["id"])
     number = pull_request["number"]
     head_sha = str(head["sha"]).lower()
-    return f"github-pr:{repository_id}:{number}:{head_sha}"
+    base_binding = json.dumps(
+        {
+            "base_ref": str(base["ref"]),
+            "base_sha": str(base["sha"]).lower(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return f"github-pr:v2:{repository_id}:{number}:{head_sha}:{hashlib.sha256(base_binding).hexdigest()}"
+
+
+def _legacy_source_key(payload: bytes) -> str:
+    """Return the v1 key retained only to finish pre-upgrade work."""
+    document = validate_pull_request_payload(payload)
+    repository = document["repository"]
+    pull_request = document["pull_request"]
+    head = pull_request["head"]
+    return f"github-pr:{repository['id']}:{pull_request['number']}:{str(head['sha']).lower()}"
 
 
 def _matching_marker(directory: pathlib.Path, source_key: str) -> bool:
@@ -487,6 +547,18 @@ def _matching_marker(directory: pathlib.Path, source_key: str) -> bool:
         except (OSError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(marker, dict) and marker.get("source_key") == source_key and marker.get("dispatched") is True:
+            return True
+    return False
+
+
+def _matching_city_request(directory: pathlib.Path, source_key: str) -> bool:
+    """Return whether the City-facing request durably represents this revision."""
+    for path in directory.glob("*.json"):
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(request, dict) and request.get("source_key") == source_key:
             return True
     return False
 
@@ -518,13 +590,21 @@ def _projected(review_root: pathlib.Path, source_key: str) -> bool:
     )
 
 
+def _reconciliation_source_key(job: Job) -> str:
+    """Use the lineage captured durably when the delivery entered the inbox."""
+    return job.source_key or _legacy_source_key(job.payload)
+
+
 def _stage_completed(job: Job) -> bool:
     """Require durable evidence rather than treating one poll as completion."""
     if job.kind == "intake":
         return True
-    source_key = _source_key(job.payload)
+    source_key = _reconciliation_source_key(job)
     assignment_root = pathlib.Path(os.environ["GC_GITHUB_DOCS_ASSIGNMENT_DIR"])
     if job.kind == "dispatch":
+        city_review_root = os.environ.get("GC_GITHUB_DOCS_CITY_REVIEW_DIR", "").strip()
+        if city_review_root:
+            return _matching_city_request(pathlib.Path(city_review_root) / "requests", source_key)
         return _matching_marker(assignment_root.parent / "dispatch", source_key)
     if job.kind == "harvest":
         return _has_candidate(pathlib.Path(os.environ["GC_GITHUB_DOCS_CANDIDATE_DIR"]), source_key)
@@ -566,7 +646,14 @@ def process_one(
         if retried and health is not None:
             health.failed(failed_at, str(exc))
         return False
-    advanced = store.advance(job.id, job.lease_token, NEXT_JOB_KIND[job.kind], now)
+    accepted_source_key = _source_key(job.payload) if job.kind == "intake" and job.source_key is None else None
+    advanced = store.advance(
+        job.id,
+        job.lease_token,
+        NEXT_JOB_KIND[job.kind],
+        now,
+        source_key=accepted_source_key,
+    )
     if advanced and health is not None:
         health.progressed(now)
     return advanced
