@@ -12,7 +12,6 @@ require() {
 }
 
 require 'github-webhook:' "$compose"
-require 'github-docs-review-runtime:' "$compose"
 require 'profiles: \[github-docs-impact\]' "$compose"
 require 'GC_SERVICE_HOST: 0.0.0.0' "$compose"
 require 'GC_SERVICE_PORT: "8080"' "$compose"
@@ -28,7 +27,12 @@ require 'GITHUB_PACK_DIR:\?Set GITHUB_PACK_DIR in \.env to the absolute GitHub p
 # inputs, so interpolation failures are caught before GitHub Actions runs.
 require 'GC_CITY_DOCS_REVIEW_RIG_DIR: \$\{\{ github\.workspace \}\}/fixture-my-project' "$ci_workflow"
 require 'GC_CITY_DOCS_REVIEW_TARGET: my-project/github-docs-impact\.docs-impact-reviewer' "$ci_workflow"
-require 'city:8080' "$root/nginx/nginx.conf"
+require 'GC_CITY_DOCS_DIRECT_CHILD_TARGET: my-project/github-docs-impact\.docs-recursion-direct-child' "$ci_workflow"
+if grep -Rqs 'GC_CITY_DOCS_JOURNEY_TARGET' "$root/.github" "$root/compose.yaml" "$root/.env.example" "$root/scripts/github-docs-impact-preflight.sh"; then
+  echo 'retired journey target must not remain in CI or preflight configuration' >&2
+  exit 1
+fi
+require 'github-webhook:8080' "$root/nginx/nginx.conf"
 require 'location = /v0/github/webhook' "$root/nginx/nginx.conf"
 require 'action = "opened"' "$rules"
 require 'action = "reopened"' "$rules"
@@ -46,8 +50,6 @@ if awk '/^  github-webhook:/{inside=1; next} inside && /^  [^ ]/{exit} inside &&
   exit 1
 fi
 
-runtime_block=$(awk '/^  github-docs-review-runtime:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-review-runtime:/{exit}' "$compose")
-[ -n "$runtime_block" ] || { echo 'github-docs-review-runtime service block is missing' >&2; exit 1; }
 webhook_block=$(awk '/^  github-webhook:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-webhook:/{exit}' "$compose")
 [ -n "$webhook_block" ] || { echo 'github-webhook service block is missing' >&2; exit 1; }
 reviewer_block=$(awk '/^  github-docs-techdocs-reviewer:/{inside=1} inside {print} inside && NR > 1 && /^  [^ ]/ && !/^  github-docs-techdocs-reviewer:/{exit}' "$compose")
@@ -65,35 +67,13 @@ require_webhook() {
   }
 }
 
-require_runtime() {
+forbid_webhook() {
   pattern=$1
-  printf '%s\n' "$runtime_block" | grep -Eq "$pattern" || {
-    echo "missing $pattern in github-docs-review-runtime" >&2
-    exit 1
-  }
-}
-
-forbid_runtime() {
-  pattern=$1
-  if printf '%s\n' "$runtime_block" | grep -Eq "$pattern"; then
-    echo "forbidden $pattern in github-docs-review-runtime" >&2
+  if printf '%s\n' "$webhook_block" | grep -Eq -- "$pattern"; then
+    echo "forbidden $pattern in github-webhook" >&2
     exit 1
   fi
 }
-
-# The runtime owns the durable record, GitHub App projection, candidate bridge,
-# and reconciliation. It has no listener; webhook ingress remains separate.
-require_runtime 'github_docs_impact_compose_adapter.py.*reconcile.*--loop'
-require_runtime 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
-require_runtime 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
-require_runtime 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
-require_runtime 'BEADS_DIR:.*CITY_DIR.*\.beads'
-require_runtime 'GITHUB_APP_PRIVATE_KEY_PEM:'
-require_runtime 'network_mode: "service:city"'
-require_runtime 'restart: unless-stopped'
-require_runtime 'GC_HOME: /var/lib/gascity'
-require_runtime 'state/gc-runtime:/var/lib/gascity'
-forbid_runtime '^    ports:'
 
 require_city() {
   pattern=$1
@@ -116,7 +96,12 @@ forbid_city() {
 require_city 'CODEX_AUTH_FILE.*:/run/secrets/codex-auth.json:ro'
 require_city 'GC_CITY_DOCS_REVIEW_ENABLED:.*true'
 require_city 'GC_CITY_DOCS_REVIEW_TARGET:.*GC_CITY_DOCS_REVIEW_TARGET'
-require_city 'docs-review:/var/lib/github-docs-impact/review'
+require_city 'GC_CITY_DOCS_DIRECT_CHILD_TARGET:.*GC_CITY_DOCS_DIRECT_CHILD_TARGET'
+require_city 'GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-docs-impact/snapshots'
+require_city 'GC_CITY_DOCS_DIRECT_RESULT_OUTBOX: /var/lib/github-docs-impact/direct-results'
+require_city 'github-city-docs/review:/var/lib/github-docs-impact/review'
+require_city 'direct-snapshots:/var/lib/github-docs-impact/snapshots:ro'
+require_city 'direct-results:/var/lib/github-docs-impact/direct-results'
 require_city 'GITHUB_PACK_DIR.*:/opt/gascity-packs:ro'
 # City runs as HOST_UID:GID, so its supervisor state and real home must not
 # live below /root (which an unprivileged container user cannot traverse).
@@ -143,6 +128,7 @@ require 'github_docs_impact_city_dispatcher.py' "$root/Dockerfile.city"
 require 'city-docs-impact.toml' "$root/docker/city-entrypoint.sh"
 require '^\[providers\.codex-docs-impact\]$' "$root/config/city-docs-impact.toml"
 require '^name = "github-docs-impact\.docs-impact-reviewer"$' "$root/config/city-docs-impact.toml"
+require '^name = "github-docs-impact\.docs-journey"$' "$root/config/city-docs-impact.toml"
 require '^work_dir = "\.gc/agents/\{\{\.AgentBase\}\}"$' "$root/config/city-docs-impact.toml"
 require 'gpt-5\.6-terra' "$root/config/city-docs-impact.toml"
 require 'model_reasoning_effort=medium' "$root/config/city-docs-impact.toml"
@@ -160,7 +146,7 @@ fi
 # profile-gated, so this does not weaken the one-supervisor-at-a-time guard.
 require '^    profiles: \[city, github-docs-impact\]$' "$compose"
 profile_services=$(docker compose --env-file "$root/.env.example" --profile github-docs-impact config --services)
-for expected in city github-webhook github-docs-review-runtime; do
+for expected in city github-webhook; do
   printf '%s\n' "$profile_services" | grep -Fx "$expected" >/dev/null || {
     echo "github-docs-impact profile does not activate $expected" >&2
     exit 1
@@ -171,11 +157,134 @@ done
 # the run, and asks the runtime adapter to dispatch only after that record.
 require_webhook 'GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review'
 require_webhook 'GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots'
+require_webhook 'GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-docs-impact/snapshots'
+require_webhook 'GC_GITHUB_DOCS_DIRECT_RESULT_DIR: /var/lib/github-intake/direct-results'
 require_webhook 'GC_SERVICE_STATE_ROOT: /var/lib/github-intake'
-require_webhook 'GC_GITHUB_INTAKE_DIRECT_BD: "1"'
-require_webhook 'BEADS_DIR:.*CITY_DIR.*\.beads'
+require_webhook 'scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro'
+require_webhook 'scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro'
+require_webhook 'scripts/github_docs_impact_compose_adapter.py:/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py:ro'
 require 'github_docs_impact_compose_adapter.py.*intake.*--once' "$rules"
-require_webhook 'network_mode: "service:city"'
-require_webhook 'GC_HOME: /var/lib/gascity'
-require_webhook 'state/gc-runtime:/var/lib/gascity'
+if printf '%s\n' "$webhook_block" | grep -Eq 'network_mode: "service:city"'; then
+  echo 'github-webhook must not share City network mode' >&2
+  exit 1
+fi
 require_webhook 'github_docs_impact_webhook.py'
+for forbidden in 'GC_CITY_ROOT:' 'GC_HOME:' 'BEADS_DIR:' 'GC_GITHUB_INTAKE_DIRECT_BD:' 'GC_CITY_DOCS_REVIEW_RIG_DIR:' 'CITY_DIR.*:.*CITY_DIR' 'GC_CITY_DOCS_REVIEW_RIG_DIR.*:.*GC_CITY_DOCS_REVIEW_RIG_DIR' 'state/gc-runtime:/var/lib/gascity' '- \./:/opt/gascity-compose:ro'; do
+  forbid_webhook "$forbidden"
+done
+
+if printf '%s\n' "$city_block" | grep -Eq 'state/github-intake:/var/lib/github-intake'; then
+  echo 'city must not mount the complete GitHub intake state' >&2
+  exit 1
+fi
+
+# This local fixture exercises the real durable gateway store while keeping the
+# City and GitHub boundaries deterministic.  It proves that recreating City
+# cannot remove an accepted delivery, and that a retry adopts the controller's
+# already-persisted source-branch follow-up intent rather than creating a
+# second one.  It deliberately makes no GitHub request.
+PYTHONDONTWRITEBYTECODE=1 ROOT="$root" python3 - <<'PY'
+import hashlib
+import importlib.util
+import json
+import os
+import pathlib
+import shutil
+import sqlite3
+import sys
+import tempfile
+from unittest import mock
+
+root = pathlib.Path(os.environ["ROOT"])
+module_path = root / "scripts/github_durable_gateway.py"
+spec = importlib.util.spec_from_file_location("github_durable_gateway_smoke", module_path)
+assert spec and spec.loader
+gateway = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = gateway
+spec.loader.exec_module(gateway)
+
+sha = "a" * 40
+source_key = f"github-pr:17:9:{sha}"
+payload = json.dumps({
+    "installation": {"id": 17},
+    "action": "opened",
+    "repository": {"id": 17, "full_name": "example/docs"},
+    "pull_request": {
+        "number": 9,
+        "base": {"sha": "b" * 40, "ref": "main", "repo": {"id": 17, "full_name": "example/docs"}},
+        "head": {"sha": sha, "ref": "feature/docs", "repo": {"id": 17, "full_name": "example/docs"}},
+    },
+}).encode()
+
+with tempfile.TemporaryDirectory() as temporary:
+    state_root = pathlib.Path(temporary) / "github-intake"
+    city_root = pathlib.Path(temporary) / "city"
+    store = gateway.GatewayStore(state_root)
+    assert store.enqueue_delivery("city-restart-delivery", "pull_request", payload, 100)
+
+    # Recreate City only; the host-mounted gateway SQLite file remains intact.
+    city_root.mkdir()
+    shutil.rmtree(city_root)
+    city_root.mkdir()
+    accepted_before_city_restart = gateway.GatewayStore(state_root)
+    queued = accepted_before_city_restart.claim(101)
+    assert queued is not None and queued.kind == "intake" and queued.payload == payload
+
+with tempfile.TemporaryDirectory() as temporary:
+    state_root = pathlib.Path(temporary) / "github-intake"
+    review_root = pathlib.Path(temporary) / "docs-review"
+    city_root = pathlib.Path(temporary) / "city"
+    store = gateway.GatewayStore(state_root)
+    assert store.enqueue_delivery("followup-retry-delivery", "pull_request", payload, 100)
+
+    def run_adapter(job):
+        if job.kind == "dispatch":
+            marker = review_root / "dispatch/assignment.json"
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(json.dumps({"source_key": source_key, "dispatched": True}), encoding="utf-8")
+        elif job.kind == "harvest":
+            candidate = review_root / "candidates/assignment.json"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(json.dumps({"artifact": {"identity": {"source_key": source_key}}}), encoding="utf-8")
+        elif job.kind == "project":
+            run = review_root / "runs" / f"{hashlib.sha256(source_key.encode()).hexdigest()}.json"
+            run.parent.mkdir(parents=True, exist_ok=True)
+            if not run.exists():
+                followup = {"source_key": source_key, "state": "intent-persisted"}
+                # The external controller saves its intent before its GitHub
+                # mutation.  Simulate City disappearing immediately after it.
+                run.write_text(json.dumps({"identity": source_key, "state": "terminal", "pending_actions": [], "followup": followup}), encoding="utf-8")
+                raise OSError("City recreated after durable follow-up intent")
+            persisted = json.loads(run.read_text(encoding="utf-8"))
+            assert persisted["followup"] == {"source_key": source_key, "state": "intent-persisted"}
+        return {}
+
+    environment = {
+        "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+        "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+        "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+    }
+    with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", side_effect=run_adapter):
+        for now in range(100, 103):
+            assert gateway.process_one(store, now, clock=lambda now=now: now)
+        assert not gateway.process_one(store, 103, clock=lambda: 103)
+
+        # Recreate City only, then reopen the same mounted gateway state and
+        # retry after its bounded backoff.  The persisted intent is adopted.
+        city_root.mkdir()
+        shutil.rmtree(city_root)
+        city_root.mkdir()
+        restarted_city_store = gateway.GatewayStore(state_root)
+        assert gateway.process_one(restarted_city_store, 105, clock=lambda: 105)
+        assert not gateway.process_one(restarted_city_store, 106, clock=lambda: 106)
+
+    persisted_runs = list((review_root / "runs").glob("*.json"))
+    assert len(persisted_runs) == 1
+    persisted = json.loads(persisted_runs[0].read_text(encoding="utf-8"))
+    assert persisted["followup"] == {"source_key": source_key, "state": "intent-persisted"}
+    with sqlite3.connect(state_root / "gateway.sqlite") as connection:
+        assert connection.execute("SELECT status, attempts FROM jobs WHERE kind = 'project'").fetchone() == ("complete", 1)
+PY
+
+sh "$root/scripts/tests/test_github_gateway_compose_restart.sh"

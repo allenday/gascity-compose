@@ -47,10 +47,10 @@ services:
         required: false
 
   # GitHub App ingress is opt-in. The worker has no host port: Nginx is the
-  # sole HTTP hop and Tailscale Funnel exposes only its webhook path.
+  # sole HTTP hop and Tailscale Funnel exposes only its webhook path. Its
+  # durable worker owns the complete intake lifecycle independently of City.
   github-webhook:
     profiles: [github-docs-impact]
-    network_mode: "service:city"
     build:
       context: .
       dockerfile: Dockerfile.city
@@ -67,65 +67,39 @@ services:
       GC_SERVICE_PORT: "8080"
       # Reuse the protected App configuration imported by the prior service.
       GC_SERVICE_STATE_ROOT: /var/lib/github-intake
-      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /var/lib/gascity
-      BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
-      GC_GITHUB_INTAKE_DIRECT_BD: "1"
-      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
+      HOME: /var/lib/github-intake/home
+      # Persistent adapter failures make health unhealthy after this bound.
+      GC_GITHUB_GATEWAY_STALL_SECONDS: "600"
       # The adapter records a run before it dispatches an immutable assignment.
       # Its separate runtime loop accepts candidates and reconciles restarts.
       GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
       GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
       GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
+      # The App stages an exact-SHA source checkout here. City sees it only
+      # through its separate read-only intake-state mount below.
+      GC_GITHUB_DOCS_SNAPSHOT_DIR: /var/lib/github-intake/direct-snapshots
+      GC_GITHUB_DOCS_SNAPSHOT_CITY_ROOT: /var/lib/github-docs-impact/snapshots
+      # City can append worker results here, but App publication is performed
+      # only by this credentialed webhook service.
+      GC_GITHUB_DOCS_DIRECT_RESULT_DIR: /var/lib/github-intake/direct-results
+      GC_GITHUB_DOCS_LEGACY_RESULT_DIR: /var/lib/github-intake/legacy-results
+      GC_GITHUB_DOCS_CITY_REVIEW_DIR: /var/lib/github-city-docs/review
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
       GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
     volumes:
       - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ./:/opt/gascity-compose:ro
-      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
+      - ./scripts/github_docs_impact_webhook.py:/opt/gascity-compose/scripts/github_docs_impact_webhook.py:ro
+      - ./scripts/github_durable_gateway.py:/opt/gascity-compose/scripts/github_durable_gateway.py:ro
+      - ./scripts/github_docs_impact_compose_adapter.py:/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py:ro
       - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/var/lib/gascity
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
-  # Deployment adapter for the self-contained reviewer. It owns no listener:
-  # the authenticated webhook service invokes `intake --once`; this loop
-  # accepts City candidates and reconciles interrupted durable runs.
-  github-docs-review-runtime:
-    profiles: [github-docs-impact]
-    image: gascity-github-webhook
-    entrypoint: ["python3", "-u", "/opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py", "reconcile", "--loop"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    environment:
-      GC_SERVICE_STATE_ROOT: /var/lib/github-intake
-      GC_CITY_ROOT: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      GC_HOME: /var/lib/gascity
-      BEADS_DIR: ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}/.beads
-      GC_GITHUB_INTAKE_DIRECT_BD: "1"
-      GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      GC_GITHUB_DOCS_REVIEW_RUNS_DIR: /var/lib/github-intake/docs-review
-      GC_GITHUB_DOCS_CANDIDATE_DIR: /var/lib/github-intake/docs-review/candidates
-      GC_GITHUB_DOCS_ASSIGNMENT_DIR: /var/lib/github-intake/docs-review/assignments
-      GC_GITHUB_DOCS_RECONCILE_SECONDS: ${GC_GITHUB_DOCS_RECONCILE_SECONDS:-15}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      GITHUB_APP_PRIVATE_KEY_PEM: ${GITHUB_APP_PRIVATE_KEY_PEM:-}
-      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-      HOME: /var/lib/github-intake/home
-    volumes:
-      - ${GITHUB_PACK_DIR:?Set GITHUB_PACK_DIR in .env to the absolute GitHub pack checkout}:/opt/gascity-packs:ro
-      - ./:/opt/gascity-compose:ro
-      - ${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}:${CITY_DIR:?Set CITY_DIR in .env to the absolute city path}
-      - ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}:${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
-      - ./state/github-intake:/var/lib/github-intake
-      - ./state/gc-runtime:/var/lib/gascity
-    network_mode: "service:city"
+      - ./state/github-city-docs:/var/lib/github-city-docs
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -189,7 +163,11 @@ services:
       GC_CITY_DOCS_REVIEW_ENABLED: ${GC_CITY_DOCS_REVIEW_ENABLED:-true}
       GC_CITY_DOCS_REVIEW_RIG_DIR: ${GC_CITY_DOCS_REVIEW_RIG_DIR:?Set GC_CITY_DOCS_REVIEW_RIG_DIR in .env to the City reviewer rig}
       GC_CITY_DOCS_REVIEW_TARGET: ${GC_CITY_DOCS_REVIEW_TARGET:?Set GC_CITY_DOCS_REVIEW_TARGET in .env to the reviewer agent qualified name}
+      GC_CITY_DOCS_DIRECT_CHILD_TARGET: ${GC_CITY_DOCS_DIRECT_CHILD_TARGET:-gascity/github-docs-impact.docs-recursion-direct-child}
       GC_CITY_DOCS_REVIEW_DIR: /var/lib/github-docs-impact/review
+      GC_CITY_DOCS_SNAPSHOT_ROOT: /var/lib/github-docs-impact/snapshots
+      GC_CITY_DOCS_DIRECT_RESULT_OUTBOX: /var/lib/github-docs-impact/direct-results
+      GC_CITY_DOCS_LEGACY_RESULT_OUTBOX: /var/lib/github-docs-impact/legacy-results
       GC_CITY_DOCS_SKILL_DIR: /opt/gascity-packs/github/skills/developer-experience-techdocs
       CODEX_HOME: /run/codex
       DOLT_USER_NAME: ${DOLT_USER_NAME:-Allen Day}
@@ -204,7 +182,10 @@ services:
       - ./state/city-mail-secrets:/run/secrets/city-mail:ro
       - ./state/mcp-agent-mail/signals:/var/lib/mcp-mail-signals:ro
       - ./state/city-mail-launcher:/var/lib/city-mail-launcher
-      - ./state/github-intake/docs-review:/var/lib/github-docs-impact/review
+      - ./state/github-city-docs/review:/var/lib/github-docs-impact/review
+      - ./state/github-intake/direct-snapshots:/var/lib/github-docs-impact/snapshots:ro
+      - ./state/github-intake/direct-results:/var/lib/github-docs-impact/direct-results
+      - ./state/github-intake/legacy-results:/var/lib/github-docs-impact/legacy-results
       - ./state/gc-runtime:/var/lib/gascity
     tmpfs:
       # The City process runs as the configured unprivileged host UID/GID,

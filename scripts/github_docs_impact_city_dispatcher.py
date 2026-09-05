@@ -14,8 +14,18 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import time
+
+
+PACK_SCRIPTS = os.environ.get("GC_GITHUB_PACK_SCRIPTS", "/opt/gascity-packs/github/scripts")
+if PACK_SCRIPTS not in sys.path:
+    sys.path.insert(0, PACK_SCRIPTS)
+
+import github_intake_common as common
+import github_intake_docs_impact as impact
+import github_intake_docs_review_runtime as review_runtime
 
 
 def _atomic_write(path: pathlib.Path, payload: bytes) -> None:
@@ -49,6 +59,14 @@ def _reviewer_target() -> tuple[str, str]:
     rig, separator, agent = target.partition("/")
     if not rig or not separator or not agent:
         raise ValueError("GC_CITY_DOCS_REVIEW_TARGET must be a qualified <rig>/<agent> name")
+    return rig, target
+
+
+def _direct_child_target() -> tuple[str, str]:
+    target = os.environ.get("GC_CITY_DOCS_DIRECT_CHILD_TARGET", "").strip()
+    rig, separator, agent = target.partition("/")
+    if not rig or not separator or not agent:
+        raise ValueError("GC_CITY_DOCS_DIRECT_CHILD_TARGET must be a qualified <rig>/<agent> name")
     return rig, target
 
 
@@ -144,6 +162,368 @@ def dispatch_pending() -> list[str]:
     return dispatched
 
 
+def _pending_direct_child_marker(path: pathlib.Path) -> dict[str, object] | None:
+    """Accept only a complete, bounded direct-child handoff."""
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {"schema_version", "kind", "handoff_id", "snapshot", "direct_child", "patch_context", "bead_id", "dispatched"}
+    if not isinstance(marker, dict) or set(marker) != required or marker.get("schema_version") != 1:
+        return None
+    if marker.get("kind") != "github-pr-docs-direct-child" or marker.get("dispatched") is not False:
+        return None
+    if not isinstance(marker.get("handoff_id"), str) or len(marker["handoff_id"]) != 64 or any(char not in "0123456789abcdef" for char in marker["handoff_id"]):
+        return None
+    if marker.get("bead_id") is not None and (not isinstance(marker.get("bead_id"), str) or not marker["bead_id"]):
+        return None
+    child, snapshot, patch_context = marker.get("direct_child"), marker.get("snapshot"), marker.get("patch_context")
+    if not isinstance(child, dict):
+        return None
+    if (not isinstance(patch_context, dict)
+            or set(patch_context) != {"schema_version", "kind", "proposal_identity"}
+            or patch_context.get("schema_version") != 1
+            or patch_context.get("kind") != "github-docs-recursion-direct-patch-context"
+            or not isinstance(patch_context.get("proposal_identity"), dict)
+            ):
+        return None
+    snapshot_fields = {"schema_version", "kind", "head_sha", "tree_sha", "path"}
+    snapshot_root = os.environ.get("GC_CITY_DOCS_SNAPSHOT_ROOT", "/var/lib/github-intake/direct-snapshots").rstrip("/")
+    if (not isinstance(snapshot, dict) or set(snapshot) != snapshot_fields
+            or snapshot.get("schema_version") != 1 or snapshot.get("kind") != "github-pr-source-snapshot"
+            or not isinstance(snapshot.get("head_sha"), str)
+            or not isinstance(snapshot.get("tree_sha"), str) or len(snapshot["tree_sha"]) != 40
+            or any(char not in "0123456789abcdef" for char in snapshot["tree_sha"].lower())
+            or not isinstance(snapshot.get("path"), str) or not snapshot["path"].startswith(snapshot_root + "/")):
+        return None
+    return marker
+
+
+def _adopt_direct_child_bead(city: str, rig: str, marker: dict[str, object]) -> tuple[bool, str | None]:
+    """Find the City Bead created before a crash could record its ID."""
+    result = subprocess.run(
+        ["gc", "--city", city, "--rig", rig, "bd", "list", "--label", "github-docs-impact", "--all", "--limit", "0", "--json"],
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    if result.returncode:
+        return False, None
+    try:
+        values = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False, None
+    if not isinstance(values, list):
+        return False, None
+    expected = marker.get("direct_child")
+    expected_snapshot = marker.get("snapshot")
+    expected_patch_context = marker.get("patch_context")
+    for value in values:
+        metadata = value.get("metadata") if isinstance(value, dict) else None
+        recorded = metadata.get("github.docs_direct_child") if isinstance(metadata, dict) else None
+        recorded_snapshot = metadata.get("github.docs_direct_child.snapshot") if isinstance(metadata, dict) else None
+        recorded_patch_context = metadata.get("github.docs_direct_child.patch_context") if isinstance(metadata, dict) else None
+        try:
+            recorded = json.loads(recorded) if isinstance(recorded, str) else recorded
+        except json.JSONDecodeError:
+            continue
+        bead_id = value.get("id") if isinstance(value, dict) else None
+        if recorded == expected and recorded_snapshot == expected_snapshot and recorded_patch_context == expected_patch_context and isinstance(bead_id, str) and bead_id:
+            return True, bead_id
+    return True, None
+
+
+def dispatch_direct_child_pending() -> list[str]:
+    """Sling exactly the child already durably admitted for a PR revision."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, target = _direct_child_target()
+    dispatched: list[str] = []
+    for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
+        marker = _pending_direct_child_marker(marker_path)
+        if marker is None:
+            continue
+        if marker["bead_id"] is None:
+            lookup_complete, bead_id = _adopt_direct_child_bead(city, rig, marker)
+            if not lookup_complete:
+                # A create-before-marker crash is indistinguishable from an
+                # unavailable or truncated lookup. Never spend the one-child
+                # budget until City has supplied a complete adoption view.
+                continue
+            if bead_id is None:
+                metadata = json.dumps({"github.docs_direct_child": marker["direct_child"], "github.docs_direct_child.snapshot": marker["snapshot"], "github.docs_direct_child.patch_context": marker["patch_context"]}, sort_keys=True, separators=(",", ":"))
+                created = subprocess.run(
+                    ["gc", "--city", city, "--rig", rig, "bd", "create", "Implement direct docs child", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", json.dumps(marker, sort_keys=True), "--json"],
+                    capture_output=True, text=True, check=False, timeout=45,
+                )
+                if created.returncode:
+                    continue
+                try:
+                    response = json.loads(created.stdout)
+                    if isinstance(response, list) and len(response) == 1:
+                        response = response[0]
+                    bead_id = response.get("id") if isinstance(response, dict) else None
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(bead_id, str) or not bead_id:
+                continue
+            marker = {**marker, "bead_id": bead_id}
+            _atomic_write(marker_path, json.dumps(marker, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        result = subprocess.run(
+            ["gc", "--city", city, "sling", target, str(marker["bead_id"]), "--force", "--no-convoy", "--no-formula", "--nudge", "--json"],
+            capture_output=True, text=True, check=False, timeout=45,
+        )
+        if result.returncode:
+            continue
+        _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        dispatched.append(marker_path.stem)
+    return dispatched
+
+
+def _direct_child_update(marker: dict[str, object], bead: dict[str, object]) -> dict[str, object] | None:
+    metadata = bead.get("metadata")
+    value = metadata.get("github.docs_direct_child.result") if isinstance(metadata, dict) else None
+    try:
+        update = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(update, dict) or set(update) != {"schema_version", "kind", "admitted_child", "state", "patch_context", "documentation_patch"} or update.get("schema_version") != 1 or update.get("kind") != "github-docs-recursion-direct-child-update":
+        return None
+    if (update.get("admitted_child") != marker.get("direct_child")
+            or update.get("patch_context") != marker.get("patch_context")
+            or update.get("state") not in {"complete", "blocked", "failed", "cancelled"}):
+        return None
+    patch = update.get("documentation_patch")
+    if (update.get("state") == "complete") != (patch is not None):
+        return None
+    patch_fields = {"schema_version", "status", "generated_at", "identity", "patch_sha256", "diff", "files", "claims", "checks", "artifact_sha256"}
+    if patch is not None and (not isinstance(patch, dict) or set(patch) != patch_fields
+                              or patch.get("schema_version") != 1 or patch.get("status") != "proposed"
+                              or not isinstance(patch.get("identity"), dict)
+                              or patch["identity"].get("head_sha") != (marker.get("snapshot") or {}).get("head_sha")
+                              or not isinstance(patch.get("patch_sha256"), str) or len(patch["patch_sha256"]) != 64
+                              or not isinstance(patch.get("artifact_sha256"), str) or len(patch["artifact_sha256"]) != 64):
+        return None
+    return update
+
+
+def harvest_direct_child_updates() -> list[str]:
+    """Validate a closed direct worker result into the narrow App outbox."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    rig, _ = _direct_child_target()
+    outbox = pathlib.Path(os.environ.get("GC_CITY_DOCS_DIRECT_RESULT_OUTBOX", "").strip())
+    if not outbox:
+        raise ValueError("GC_CITY_DOCS_DIRECT_RESULT_OUTBOX is required")
+    handed_off: list[str] = []
+    for marker_path in sorted((review_dir / "direct-child-dispatch").glob("*.json")):
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            if not isinstance(marker, dict) or marker.get("dispatched") is not True or not isinstance(marker.get("bead_id"), str):
+                continue
+            bead_result = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
+            if bead_result.returncode:
+                continue
+            bead = json.loads(bead_result.stdout)
+            if isinstance(bead, list) and len(bead) == 1:
+                bead = bead[0]
+            if not isinstance(bead, dict) or bead.get("status") != "closed":
+                continue
+            update = _direct_child_update(marker, bead)
+            if update is None:
+                continue
+            result_path = outbox / f"{marker['handoff_id']}.json"
+            payload = {"handoff_id": marker["handoff_id"], "update": update}
+            if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
+                continue
+            if not result_path.exists():
+                _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "outboxed"}, sort_keys=True, separators=(",", ":")).encode())
+            handed_off.append(marker_path.stem)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return handed_off
+
+
+def _pending_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
+    """Validate one controller-projected journey child dispatch request."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {"bead_id", "child_key", "journey_identity", "admitted_child", "dispatched"}
+    if not isinstance(value, dict) or set(value) != required or value.get("dispatched") is not False:
+        return None
+    result = {key: value.get(key) for key in ("bead_id", "child_key", "journey_identity")}
+    if not all(isinstance(item, str) and item for item in result.values()):
+        return None
+    if not result["journey_identity"].startswith("github-docs-journey:"):
+        return None
+    if not isinstance(value.get("admitted_child"), dict):
+        return None
+    return {**result, "admitted_child": value["admitted_child"]}  # type: ignore[return-value]
+
+
+def _journey_target() -> str:
+    """Keep persisted legacy work on the legacy agent in the configured rig."""
+    rig, _ = _direct_child_target()
+    return f"{rig}/github-docs-impact.docs-journey"
+
+
+def dispatch_journey_pending() -> list[str]:
+    """Sling only children already projected by the durable journey controller."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    target = _journey_target()
+    dispatched: list[str] = []
+    for marker_path in sorted((review_dir / "journey-dispatch").glob("*.json")):
+        marker = _pending_journey_marker(marker_path)
+        if marker is None:
+            continue
+        result = subprocess.run(
+            ["gc", "--city", city, "sling", target, marker["bead_id"], "--force", "--no-convoy", "--no-formula", "--nudge", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=45,
+        )
+        if result.returncode:
+            continue
+        _atomic_write(marker_path, json.dumps({**marker, "dispatched": True}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        dispatched.append(marker_path.stem)
+    return dispatched
+
+
+def _completed_journey_marker(path: pathlib.Path) -> dict[str, str] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    required = {"bead_id", "child_key", "journey_identity", "admitted_child", "dispatched"}
+    if not isinstance(value, dict) or set(value) != required or value.get("dispatched") is not True:
+        return None
+    result = {key: value.get(key) for key in ("bead_id", "child_key", "journey_identity")}
+    if not all(isinstance(item, str) and item for item in result.values()):
+        return None
+    if not isinstance(value.get("admitted_child"), dict):
+        return None
+    return {**result, "admitted_child": value["admitted_child"]}  # type: ignore[return-value]
+
+
+def _matches_admitted_child(expected: dict[str, object], update: dict[str, object]) -> bool:
+    admitted = update.get("admitted_child")
+    if not isinstance(admitted, dict):
+        return False
+    fields = (
+        "journey_identity", "snapshot_sha", "decision_identity", "decision_digest",
+        "source_key", "source_url", "documentation_entry_point", "parent_issue_url", "evidence_paths",
+    )
+    return all(admitted.get(field) == expected.get(field) for field in fields)
+
+
+def _original_check_outcome(journey: dict[str, object]) -> str:
+    """Return whether a settled journey can terminalize its originating Check.
+
+    A docs-followup PR is evidence of work prepared, not evidence that the
+    contributor's PR is documented. Its merge produces a new source SHA and a
+    new normal docs-impact review, which alone may pass the required Check.
+    """
+    state = journey.get("state")
+    if state != "baseline-complete":
+        return "action_required" if state in {
+            "owner-review-required", "blocked-on-product-decision", "budget-exhausted", "cancelled",
+        } else "pending"
+    actions = journey.get("actions")
+    docs_pr = any(
+        isinstance(action, dict) and action.get("kind") == "create_docs_pr" and action.get("state") == "completed"
+        for action in actions
+    ) if isinstance(actions, list) else False
+    return "pending" if docs_pr else "action_required"
+
+
+def _journey_update_from_peek(peek: dict[str, object]) -> dict[str, object] | None:
+    """Recover one final worker update without trusting surrounding prose."""
+    output = peek.get("output")
+    if not isinstance(output, str):
+        return None
+    compact = "".join(line.strip() for line in output.splitlines())
+    decoder = json.JSONDecoder()
+    update: dict[str, object] | None = None
+    for index, char in enumerate(compact):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(compact[index:])
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(value, dict)
+                and value.get("schema_version") == 1
+                and value.get("kind") == "github-docs-journey-child-update"
+                and value.get("state") in {"complete", "blocked", "failed", "cancelled"}
+                and isinstance(value.get("admitted_child"), dict)):
+            update = value
+    return update
+
+
+def _journey_update_from_bead(bead: dict[str, object]) -> dict[str, object] | None:
+    """Read the worker's durable terminal update, never a dead session."""
+    metadata = bead.get("metadata")
+    value = metadata.get("docs-journey.result") if isinstance(metadata, dict) else None
+    try:
+        update = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return None
+    return update if isinstance(update, dict) and update.get("kind") == "github-docs-journey-child-update" else None
+
+
+def harvest_journey_updates() -> list[str]:
+    """Write legacy worker evidence to the App-owned compatibility outbox."""
+    review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
+    city = os.environ.get("CITY_PATH", "").strip()
+    if not review_dir or not city:
+        raise ValueError("GC_CITY_DOCS_REVIEW_DIR and CITY_PATH are required")
+    target = _journey_target()
+    rig = target.partition("/")[0]
+    outbox = pathlib.Path(os.environ.get("GC_CITY_DOCS_LEGACY_RESULT_OUTBOX", "").strip())
+    if not outbox:
+        raise ValueError("GC_CITY_DOCS_LEGACY_RESULT_OUTBOX is required")
+    harvested: list[str] = []
+    for marker_path in sorted((review_dir / "journey-dispatch").glob("*.json")):
+        marker = _completed_journey_marker(marker_path)
+        if marker is None:
+            continue
+        try:
+            bead = subprocess.run(
+                ["gc", "--city", city, "--rig", rig, "bd", "show", marker["bead_id"], "--json"],
+                capture_output=True, text=True, check=False, timeout=20,
+            )
+            if bead.returncode:
+                continue
+            bead_json = json.loads(bead.stdout)
+            if isinstance(bead_json, list):
+                bead_json = bead_json[0]
+            if not isinstance(bead_json, dict) or bead_json.get("status") != "closed":
+                continue
+            update = _journey_update_from_bead(bead_json)
+            if update is None or not _matches_admitted_child(marker["admitted_child"], update):
+                continue
+            payload = {"identity": marker["journey_identity"], "child_key": marker["child_key"], "admitted_child": marker["admitted_child"], "update": update}
+            result_path = outbox / marker_path.name
+            if result_path.exists() and json.loads(result_path.read_text(encoding="utf-8")) != payload:
+                continue
+            if not result_path.exists():
+                _atomic_write(result_path, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            _atomic_write(marker_path, json.dumps({**marker, "dispatched": "outboxed"}, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            harvested.append(marker_path.stem)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            continue
+    return harvested
+
+
 def create_pending() -> list[str]:
     """Create reviewer Beads through City's managed store, never a sidecar."""
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
@@ -164,7 +544,22 @@ def create_pending() -> list[str]:
                 continue
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
-        result = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--description", description, "--json"], capture_output=True, text=True, check=False, timeout=45)
+        # Evidence bundles can exceed Linux's argv limit.  Keep their exact
+        # contents out of the process argument vector while preserving the
+        # immutable request that the gateway already persisted.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as handle:
+            handle.write(description)
+            body_path = pathlib.Path(handle.name)
+        try:
+            result = subprocess.run(
+                ["gc", "--city", city, "--rig", rig, "bd", "create", "Review GitHub documentation impact", "--type", "task", "--priority", "2", "--labels", "github-docs-impact", "--metadata", metadata, "--body-file", str(body_path), "--json"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=45,
+            )
+        finally:
+            body_path.unlink(missing_ok=True)
         if result.returncode:
             continue
         try:
@@ -233,6 +628,49 @@ def _write_invalid_final(path: pathlib.Path, *, replace_stale: bool) -> None:
     _atomic_write(path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
 
 
+def _completion_path(review_dir: pathlib.Path, marker_path: pathlib.Path) -> pathlib.Path:
+    return review_dir / "completions" / marker_path.name
+
+
+def _transcript_session_id(path: pathlib.Path) -> str | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    session_id = value.get("session_id") if isinstance(value, dict) else None
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _close_persisted_review(review_dir: pathlib.Path, marker_path: pathlib.Path, marker: dict[str, object], session_id: str, city: str, rig: str) -> None:
+    """Close only the session that produced an already-durable review.
+
+    The intent is written before the guarded status transition, so a restart
+    retries transport failures.  The Beads update guards make a reaper's new
+    assignee a harmless lost race rather than a task we close by mistake.
+    """
+    path = _completion_path(review_dir, marker_path)
+    expected = {"bead_id": marker["bead_id"], "source_key": marker["source_key"], "session_id": session_id, "state": "close-pending"}
+    if path.exists():
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or any(value.get(key) != expected[key] for key in ("bead_id", "source_key", "session_id")):
+            raise ValueError("invalid review completion marker")
+        if value.get("state") in {"closed", "ownership-changed"}:
+            return
+    else:
+        _atomic_write(path, json.dumps(expected, sort_keys=True, separators=(",", ":")).encode())
+    closed = subprocess.run(
+        ["gc", "--city", city, "--rig", rig, "bd", "update", str(marker["bead_id"]), "--status", "closed", "--if-assignee", session_id, "--if-status", "in_progress", "--session", session_id, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    if closed.returncode == 0:
+        _atomic_write(path, json.dumps({**expected, "state": "closed"}, sort_keys=True, separators=(",", ":")).encode())
+    elif closed.returncode == 13:
+        _atomic_write(path, json.dumps({**expected, "state": "ownership-changed"}, sort_keys=True, separators=(",", ":")).encode())
+
+
 def export_transcripts() -> list[str]:
     review_dir = pathlib.Path(os.environ.get("GC_CITY_DOCS_REVIEW_DIR", "").strip())
     city = os.environ.get("CITY_PATH", "").strip()
@@ -249,6 +687,16 @@ def export_transcripts() -> list[str]:
             replace_stale = False
             if transcript_path.exists():
                 if _stored_transcript_matches_source(transcript_path, marker_json["source_key"]):
+                    completion = _completion_path(review_dir, marker_path)
+                    if completion.exists():
+                        value = json.loads(completion.read_text(encoding="utf-8"))
+                        session_id = value.get("session_id") if isinstance(value, dict) else None
+                        if isinstance(session_id, str) and session_id:
+                            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
+                    else:
+                        session_id = _transcript_session_id(transcript_path)
+                        if session_id is not None:
+                            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
                     continue
                 replace_stale = True
             bead = subprocess.run(["gc", "--city", city, "--rig", rig, "bd", "show", marker_json["bead_id"], "--json"], capture_output=True, text=True, check=False, timeout=20)
@@ -277,10 +725,11 @@ def export_transcripts() -> list[str]:
                     _write_invalid_final(transcript_path, replace_stale=replace_stale)
                     exported.append(marker_path.stem)
                 continue
-            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}]}
+            transcript = {"entries": [{"role": "assistant", "text": json.dumps(review, sort_keys=True, separators=(",", ":"))}], "session_id": session_id}
             if replace_stale:
                 _quarantine_stale_transcript(transcript_path)
             _atomic_write(transcript_path, json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode())
+            _close_persisted_review(review_dir, marker_path, marker_json, session_id, city, rig)
             exported.append(marker_path.stem)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
             continue
@@ -294,7 +743,7 @@ def main() -> int:
     interval = max(1.0, float(os.environ.get("GC_CITY_DOCS_DISPATCH_SECONDS", "5")))
     while True:
         try:
-            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
+            print(json.dumps({"retired": retire_superseded(), "created": create_pending(), "dispatched": dispatch_pending(), "direct_children": dispatch_direct_child_pending(), "direct_results": harvest_direct_child_updates(), "legacy_journeys": dispatch_journey_pending(), "legacy_updates": harvest_journey_updates(), "transcripts": export_transcripts()}, sort_keys=True), flush=True)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True), flush=True)
         if args.once:

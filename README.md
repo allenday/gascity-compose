@@ -28,6 +28,9 @@ Prometheus scrape targets.
 
 ## GitHub documentation-impact smoke adapter
 
+For the currently implemented durable handoffs and the intended narrower
+pull-request path, see [GitHub docs-impact architecture](docs/github-docs-impact-architecture.md).
+
 Enable the complete GitHub profile with the initial App credentials in ignored
 `.env` or an already-imported protected intake state. Before starting it, set
 the absolute pack checkout and City review-rig settings:
@@ -69,6 +72,26 @@ that task's final session transcript, binds and validates it against the saved
 assignment, then uses the App credentials to publish the compact Check Run or
 App-owned follow-up PR. It periodically reconciles interrupted runs. No
 proposal diff or deployment-admin page is linked from GitHub.
+
+The gateway keeps its accepted-delivery inbox and leased lifecycle jobs in
+`state/github-intake/gateway.sqlite`; do not remove this file when recreating
+only `city`. Its container health check reads `/healthz`, which reports the
+runnable job count, the oldest runnable job, and worker liveness. An overlong
+adapter attempt or persistent adapter failures make health unhealthy after 600
+seconds without a successful job advancement;
+`GC_GITHUB_GATEWAY_STALL_SECONDS` can set a different bounded threshold. To
+replay the existing external docs-impact controller once during development
+(without creating a separate controller or a new GitHub delivery), run:
+
+```bash
+docker compose --profile github-docs-impact exec github-webhook \
+  python3 /opt/gascity-compose/scripts/github_docs_impact_compose_adapter.py reconcile --once
+```
+
+The gateway worker continues queued jobs from that same SQLite state. A
+docs-required proposal may therefore finish its App-owned follow-up against
+the source PR branch after City is recreated; replay remains idempotent and
+does not create another follow-up intent.
 
 ## Start the City safely
 
