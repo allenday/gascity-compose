@@ -551,6 +551,18 @@ def _matching_marker(directory: pathlib.Path, source_key: str) -> bool:
     return False
 
 
+def _matching_city_request(directory: pathlib.Path, source_key: str) -> bool:
+    """Return whether the City-facing request durably represents this revision."""
+    for path in directory.glob("*.json"):
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(request, dict) and request.get("source_key") == source_key:
+            return True
+    return False
+
+
 def _has_candidate(candidate_root: pathlib.Path, source_key: str) -> bool:
     for path in candidate_root.glob("*.json"):
         try:
@@ -590,6 +602,9 @@ def _stage_completed(job: Job) -> bool:
     source_key = _reconciliation_source_key(job)
     assignment_root = pathlib.Path(os.environ["GC_GITHUB_DOCS_ASSIGNMENT_DIR"])
     if job.kind == "dispatch":
+        city_review_root = os.environ.get("GC_GITHUB_DOCS_CITY_REVIEW_DIR", "").strip()
+        if city_review_root:
+            return _matching_city_request(pathlib.Path(city_review_root) / "requests", source_key)
         return _matching_marker(assignment_root.parent / "dispatch", source_key)
     if job.kind == "harvest":
         return _has_candidate(pathlib.Path(os.environ["GC_GITHUB_DOCS_CANDIDATE_DIR"]), source_key)

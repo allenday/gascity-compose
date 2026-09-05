@@ -634,6 +634,34 @@ class GatewayIngressWorkerTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT status, attempts, lease_until FROM jobs WHERE kind = 'dispatch'").fetchone(), ("pending", 1, None))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 0)
 
+    def test_city_request_completes_direct_dispatch(self) -> None:
+        """The direct-recursion request is the durable dispatch receipt, not a legacy marker."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            store = gateway.GatewayStore(root)
+            payload = _valid_payload()
+            source_key = gateway._source_key(payload)
+            store.enqueue_delivery("delivery-city-request-123", "pull_request", payload, 100)
+            review_root = root / "docs-review"
+            city_review = root / "city-review"
+            request = city_review / "requests" / "request.json"
+            request.parent.mkdir(parents=True)
+            request.write_text(json.dumps({"source_key": source_key}))
+            environment = {
+                "GC_GITHUB_DOCS_ASSIGNMENT_DIR": str(review_root / "assignments"),
+                "GC_GITHUB_DOCS_CANDIDATE_DIR": str(review_root / "candidates"),
+                "GC_GITHUB_DOCS_REVIEW_RUNS_DIR": str(review_root),
+                "GC_GITHUB_DOCS_CITY_REVIEW_DIR": str(city_review),
+            }
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(gateway, "_run_adapter", return_value={}):
+                self.assertTrue(gateway.process_one(store, 100))
+                self.assertTrue(gateway.process_one(store, 101))
+
+            with sqlite3.connect(root / "gateway.sqlite") as connection:
+                self.assertEqual(connection.execute("SELECT status FROM jobs WHERE kind = 'dispatch'").fetchone(), ("complete",))
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'harvest'").fetchone()[0], 1)
+
     def test_newer_pr_revision_preempts_old_reconciliation_stages(self) -> None:
         """A fresh PR revision must not sit behind stale harvest or dispatch work."""
         with tempfile.TemporaryDirectory() as temp:
